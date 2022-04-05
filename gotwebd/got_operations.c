@@ -576,11 +576,11 @@ got_output_diff(struct request *c)
 		    NULL, NULL, 3, 0, 0, repo, f);
 		break;
 	case GOT_OBJ_TYPE_TREE:
-		error = got_diff_objects_as_trees(NULL, NULL, id1, id2,
+		error = got_diff_objects_as_trees(NULL, NULL, id1, id2, NULL,
 		   "", "", 3, 0, 0, repo, f);
 		break;
 	case GOT_OBJ_TYPE_COMMIT:
-		error = got_diff_objects_as_commits(NULL, NULL, id1, id2,
+		error = got_diff_objects_as_commits(NULL, NULL, id1, id2, NULL,
 		    3, 0, 0, repo, f);
 		break;
 	default:
