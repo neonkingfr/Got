@@ -390,7 +390,7 @@ got_get_repo_commits(struct request *c, int limit)
 		if (error) {
 			if (error->code == GOT_ERR_ITER_COMPLETED)
 				error = NULL;
-			goto err;
+			goto done;
 		}
 		if (id == NULL)
 			goto err;
