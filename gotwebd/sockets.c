@@ -223,8 +223,8 @@ sockets_conf_new_socket(struct gotwebd *env, struct server *srv, int id,
 
 	/* each sock also gets a privileged /tmp fd */
 	if ((priv_fd = calloc(1, sizeof(*priv_fd))) == NULL) {
-		free(sock);
 		free(sock->conf.al);
+		free(sock);
 		fatalx("%s: calloc", __func__);
 	}
 

@@ -87,15 +87,18 @@ fcgi_request(int fd, short events, void *arg)
 	 */
 	do {
 		parsed = fcgi_parse_record(c->buf + c->buf_pos, c->buf_len, c);
-		c->buf_pos += parsed;
-		c->buf_len -= parsed;
+		if (parsed != 0) {
+			c->buf_pos += parsed;
+			c->buf_len -= parsed;
+		}
 	} while (parsed > 0 && c->buf_len > 0);
 
 	/* Make space for further reads */
-	if (c->buf_len > 0) {
-		bcopy(c->buf + c->buf_pos, c->buf, c->buf_len);
-		c->buf_pos = 0;
-	}
+	if (parsed != 0)
+		if (c->buf_len > 0) {
+			bcopy(c->buf + c->buf_pos, c->buf, c->buf_len);
+			c->buf_pos = 0;
+		}
 	return;
 fail:
 	fcgi_cleanup_request(c);
@@ -134,7 +137,7 @@ fcgi_parse_record(uint8_t *buf, size_t n, struct request *c)
 	case FCGI_ABORT_REQUEST:
 		fcgi_create_end_record(c);
 		fcgi_cleanup_request(c);
-		break;
+		return 0;
 	default:
 		log_warn("unimplemented type %d", h->type);
 		break;
@@ -295,7 +298,7 @@ fcgi_gen_response(struct request *c, char *data)
 	struct fcgi_response *resp;
 	struct fcgi_record_header *header;
 	ssize_t n = 0;
-	int i, j;
+	int i;
 
 	if (c->sock->client_status == CLIENT_DISCONNECT)
 		return -1;
@@ -322,8 +325,6 @@ fcgi_gen_response(struct request *c, char *data)
 		resp->data[i+8] = data[i];
 		n++;
 	}
-
-	j = i;
 
 	header->content_len = htons(n);
 	resp->data_pos = 0;

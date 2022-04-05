@@ -1246,7 +1246,7 @@ done:
 	if (f != NULL && fclose(f) == EOF && error == NULL)
 		error = got_error_from_errno("fclose");
 	free(d_file);
-	return NULL;
+	return error;
 }
 
 const struct got_error *

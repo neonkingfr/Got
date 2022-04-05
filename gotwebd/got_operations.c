@@ -69,7 +69,7 @@ got_get_repo_owner(char **owner, struct server *srv, char *dir)
 	if (gitconfig_owner) {
 		*owner = strdup(gitconfig_owner);
 		if (*owner == NULL)
-			error = got_error_from_errno("strdup");
+			return got_error_from_errno("strdup");
 	}
 	error = got_repo_close(repo);
 	return error;
