@@ -317,7 +317,7 @@ gotweb_get_server(uint8_t *document_root, uint8_t *subdomain)
 	/* if those fail, send first server */
 	TAILQ_FOREACH(srv, gotwebd_env->servers, entry)
 		if (srv != NULL)
-			goto done;
+			break;
 
 done:
 	return srv;
@@ -1587,6 +1587,87 @@ done:
 }
 
 static const struct got_error *
+gotweb_render_tree(struct request *c)
+{
+	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct repo_commit *rc = NULL;
+	char *age = NULL;
+
+	error = got_get_repo_commits(c, 1);
+	if (error)
+		return error;
+
+	rc = TAILQ_FIRST(&t->repo_commits);
+
+	error = gotweb_get_time_str(&age, rc->committer_time, TM_LONG);
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tree_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tree_title'>Tree</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tree_content'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tree_header_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tree_header'>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_tree_title'>Tree:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_tree'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->tree_id) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_age_title'>Date:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_age'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, age ? age : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_commit_msg_title'>Message:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_commit_msg'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->commit_msg) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='dotted_line'></div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tree'>\n") == -1)
+		goto done;
+
+	error = got_output_repo_tree(c);
+	if (error)
+		goto done;
+
+	fcgi_gen_response(c, "</div>\n");
+done:
+	return error;
+}
+
+static const struct got_error *
 gotweb_render_diff(struct request *c)
 {
 	const struct got_error *error = NULL;
@@ -1701,8 +1782,7 @@ gotweb_render_diff(struct request *c)
 
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
+	fcgi_gen_response(c, "</div>\n");
 done:
 	free(age);
 	free(author);
@@ -1783,10 +1863,8 @@ content:
 	}
 
 	error = gotweb_render_tags(c);
-	if (error) {
+	if (error)
 		log_warnx("%s: %s", __func__, error->msg);
-		goto done;
-	}
 done:
 	return error;
 }
@@ -1796,12 +1874,8 @@ gotweb_render_tag(struct request *c)
 {
 	const struct got_error *error = NULL;
 	struct repo_tag *rt = NULL;
-	struct server *srv = c->srv;
 	struct transport *t = c->t;
-	struct querystring *qs = t->qs;
-	struct repo_dir *repo_dir = t->repo_dir;
 	char *age = NULL, *author = NULL;
-	int commit_found = 0;
 
 	error = got_get_repo_tags(c, 1);
 	if (error)
@@ -1899,8 +1973,7 @@ gotweb_render_tag(struct request *c)
 
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
+	fcgi_gen_response(c, "</div>\n");
 done:
 	free(age);
 	free(author);
@@ -1916,7 +1989,7 @@ gotweb_render_tags(struct request *c)
 	struct transport *t = c->t;
 	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = t->repo_dir;
-	char *smallerthan, *newline;
+	char *newline;
 	char *age = NULL;
 	int commit_found = 0;
 
@@ -2082,51 +2155,6 @@ gotweb_render_tags(struct request *c)
 	fcgi_gen_response(c, "</div>\n");
 done:
 	free(age);
-	return error;
-}
-
-static const struct got_error *
-gotweb_render_tree(struct request *c)
-{
-	const struct got_error *error = NULL;
-
-	if (fcgi_gen_response(c, "<div id='tree_title_wrapper'>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "<div id='tree_title'>Tree</div>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-
-	if (fcgi_gen_response(c, "<div id='tree_content'>\n") == -1)
-		goto done;
-
-
-
-
-	if (fcgi_gen_response(c, "<div id='tree_header_wrapper'>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "<div id='tree_header'>\n") == -1)
-		goto done;
-
-
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-
-	if (fcgi_gen_response(c, "<div id='tree'>\n") == -1)
-		goto done;
-
-
-
-
-
-
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-done:
 	return error;
 }
 

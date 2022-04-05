@@ -16,6 +16,7 @@
  */
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <event.h>
 #include <imsg.h>
@@ -754,6 +755,319 @@ err:
 	got_ref_list_free(&refs);
 	free(repo_path);
 	free(id);
+	return error;
+}
+
+const struct got_error *
+got_output_repo_tree(struct request *c)
+{
+	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
+	struct querystring *qs = t->qs;
+	struct repo_commit *rc = NULL;
+	struct got_object_id *id1 = NULL, *id2 = NULL;
+	struct got_reflist_head refs;
+	struct got_tree_object *tree = NULL;
+	struct repo_dir *repo_dir = t->repo_dir;
+	char *label1 = NULL, *label2 = NULL, *id_str = NULL, *class = NULL;
+	char *path = NULL, *in_repo_path = NULL, *build_folder = NULL;
+	int nentries, i, class_flip = 0;
+
+	TAILQ_INIT(&refs);
+
+	rc = TAILQ_FIRST(&t->repo_commits);
+
+	if (qs->folder != NULL) {
+		path = strdup(qs->folder);
+		if (path == NULL) {
+			error = got_error_from_errno("strdup");
+			goto done;
+		}
+	} else {
+		error = got_repo_map_path(&in_repo_path, repo, repo_dir->path);
+		if (error)
+			goto done;
+		free(path);
+		path = in_repo_path;
+	}
+
+	error = got_repo_match_object_id(&id2, &label2, rc->commit_id,
+	    GOT_OBJ_TYPE_COMMIT, &refs, repo);
+	if (error)
+		goto done;
+
+	error = got_object_id_by_path(&id1, repo, id2, path);
+	if (error)
+		goto done;
+
+	error = got_object_open_as_tree(&tree, repo, id1);
+	if (error)
+		goto done;
+
+	nentries = got_object_tree_get_nentries(tree);
+
+	for (i = 0; i < nentries; i++) {
+		struct got_tree_entry *te;
+		char *modestr = "", *name = NULL;
+		mode_t mode;
+
+		te = got_object_tree_get_entry(tree, i);
+
+		error = got_object_id_str(&id_str, got_tree_entry_get_id(te));
+		if (error)
+			goto done;
+
+		mode = got_tree_entry_get_mode(te);
+		if (got_object_tree_entry_is_submodule(te))
+			modestr = "$";
+		else if (S_ISLNK(mode))
+			modestr = "@";
+		else if (S_ISDIR(mode))
+			modestr = "/";
+		else if (mode & S_IXUSR)
+			modestr = "*";
+
+		if (class_flip == 0) {
+			class = "back_lightgray";
+			class_flip = 1;
+		} else {
+			class = "back_white";
+			class_flip = 0;
+		}
+
+		name = strdup(got_tree_entry_get_name(te));
+		if (S_ISDIR(mode)) {
+			if (asprintf(&build_folder, "%s/%s",
+			    qs->folder ? qs->folder : "",
+			    got_tree_entry_get_name(te)) == -1) {
+				error = got_error_from_errno("asprintf");
+				goto done;
+			}
+
+			if (fcgi_gen_response(c,
+			    "<div id='tree_wrapper'>\n") == -1)
+			goto done;
+			if (fcgi_gen_response(c, "<div id='tree_line' "
+			    "class='") == -1)
+				goto done;
+			if (fcgi_gen_response(c, class) == -1)
+				goto done;
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "<a class='diff_directory' "
+			    "href='?index_page=") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, qs->index_page_str) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&path=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->path) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&action=tree") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&commit=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->commit) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&folder=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, build_folder) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+			if (fcgi_gen_response(c, name) == -1)
+				goto done;
+			if (fcgi_gen_response(c, modestr) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "</a>\n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "<div id='tree_line_blank' "
+			    "class='") == -1)
+				goto done;
+			if (fcgi_gen_response(c, class) == -1)
+				goto done;
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "&nbsp;") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
+		} else {
+			name = strdup(got_tree_entry_get_name(te));
+
+			if (fcgi_gen_response(c,
+			    "<div id='tree_wrapper'>\n") == -1)
+			goto done;
+			if (fcgi_gen_response(c, "<div id='tree_line' "
+			    "class='") == -1)
+				goto done;
+			if (fcgi_gen_response(c, class) == -1)
+				goto done;
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c,
+			    "<a href='?index_page=") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, qs->index_page_str) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&path=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->path) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&action=blob") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&commit=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->commit) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&folder=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->folder) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&file=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, name) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+			if (fcgi_gen_response(c, name) == -1)
+				goto done;
+			if (fcgi_gen_response(c, modestr) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "</a>\n") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "<div class='") == -1)
+				goto done;
+			if (fcgi_gen_response(c, class) == -1)
+				goto done;
+			if (fcgi_gen_response(c,
+			    " id='tree_line_navs'>\n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c,
+			    "<a href='?index_page=") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, qs->index_page_str) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&path=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->path) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&action=blob") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&commit=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->commit) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&folder=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->folder) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&file=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, name) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "blob") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</a>\n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, " | \n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c,
+			    "<a href='?index_page=") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, qs->index_page_str) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&path=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->path) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&action=blame") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&commit=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->commit) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&folder=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->folder) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "&file=") == -1)
+				goto done;
+			if (fcgi_gen_response(c, name) == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "'>") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "blame") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</a>\n") == -1)
+				goto done;
+
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
+		}
+		free(id_str);
+		id_str = NULL;
+		free(build_folder);
+		build_folder = NULL;
+		free(name);
+		name = NULL;
+	}
+done:
+	got_ref_list_free(&refs);
+	free(label1);
+	free(label2);
+	free(id1);
+	free(id2);
 	return error;
 }
 
