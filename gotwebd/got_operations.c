@@ -472,8 +472,7 @@ done:
 	 * for navigation through briefs and commits
 	 */
 	if (t->prev_id == NULL && qs->commit != NULL &&
-	    (qs->action == BRIEFS || qs->action == COMMITS ||
-	     qs->action == SUMMARY)) {
+	    (qs->action == BRIEFS || qs->action == COMMITS)) {
 		commit_found = 0;
 		TAILQ_FOREACH_REVERSE(r_s, &t->repo_commits, repo_head,
 		    entry) {
