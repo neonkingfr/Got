@@ -292,7 +292,7 @@ got_get_repo_commits(struct request *c, int limit)
 	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = c->t->repo_dir;
 	char *in_repo_path = NULL, *repo_path = NULL;
-	int chk_next = 0, chk_multi = 0, prev_set = 0;
+	int chk_next = 0, chk_multi = 0;
 
 	TAILQ_INIT(&refs);
 
@@ -315,7 +315,7 @@ got_get_repo_commits(struct request *c, int limit)
 		error = got_ref_open(&head_ref, repo, t->headref, 0);
 		if (error)
 			return error;
-
+		t->last_commit = 1;
 		error = got_ref_resolve(&id, repo, head_ref);
 		got_ref_close(head_ref);
 		if (error)
@@ -430,13 +430,12 @@ got_get_repo_commits(struct request *c, int limit)
 			 * we have a commit_id now, so copy it to next_prev_id
 			 * for navigation through briefs and commits
 			 */
-			if (t->next_prev_id == NULL && prev_set == 0 &&
+			if (t->prev_id == NULL && t->last_commit == 0 &&
 			    (qs->action == BRIEFS || qs->action == COMMITS ||
 			     qs->action == SUMMARY)) {
-				prev_set = 1;
-				t->next_prev_id =
+				t->prev_id =
 				    strdup(new_repo_commit->commit_id);
-				if (t->next_prev_id == NULL) {
+				if (t->prev_id == NULL) {
 					error = got_error_from_errno("strdup");
 					goto done;
 				}
@@ -499,4 +498,3 @@ got_init_repo_commit(struct repo_commit **rc)
 
 	return error;
 }
-

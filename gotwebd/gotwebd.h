@@ -173,12 +173,13 @@ struct transport {
 	struct got_repository	*repo;
 	struct repo_dir		*repo_dir;
 	struct querystring	*qs;
+	const char		*headref;
 	char			*next_id;
-	char			*next_prev_id;
+	char			*prev_id;
 	unsigned int		 repos_total;
 	unsigned int		 next_disp;
 	unsigned int		 prev_disp;
-	const char		*headref;
+	int			 last_commit;
 };
 
 struct request {
@@ -346,11 +347,7 @@ struct querystring {
 	char		*headref;
 	unsigned int	 index_page;
 	char		*index_page_str;
-	unsigned int	 page;
-	char		*page_str;
 	char		*path;
-	char		*prev;
-	char		*prev_prev;
 };
 
 struct querystring_keys {
@@ -370,10 +367,7 @@ enum querystring_elements {
 	FOLDER,
 	HEADREF,
 	INDEX_PAGE,
-	PAGE,
 	PATH,
-	PREV,
-	PREV_PREV,
 	QSELEM__MAX,
 };
 

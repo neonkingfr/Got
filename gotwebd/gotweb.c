@@ -58,16 +58,13 @@ enum gotweb_tags_type {
 };
 
 static const struct querystring_keys querystring_keys[] = {
-	{ "action",	ACTION },
-	{ "commit",	COMMIT },
-	{ "file",	RFILE },
-	{ "folder",	FOLDER },
-	{ "headref",	HEADREF },
-	{ "index_page",	INDEX_PAGE },
-	{ "page",	PAGE },
-	{ "path",	PATH },
-	{ "prev",	PREV },
-	{ "prev_prev",	PREV_PREV },
+	{ "action",		ACTION },
+	{ "commit",		COMMIT },
+	{ "file",		RFILE },
+	{ "folder",		FOLDER },
+	{ "headref",		HEADREF },
+	{ "index_page",		INDEX_PAGE },
+	{ "path",		PATH },
 };
 
 static const struct action_keys action_keys[] = {
@@ -372,10 +369,11 @@ gotweb_init_transport(struct transport **t)
 	(*t)->repo_dir = NULL;
 	(*t)->qs = NULL;
 	(*t)->next_id = NULL;
-	(*t)->next_prev_id = NULL;
+	(*t)->prev_id = NULL;
 	(*t)->next_disp = 0;
 	(*t)->prev_disp = 0;
 	(*t)->headref = GOT_REF_HEAD;
+	(*t)->last_commit = 0;
 
 	return error;
 }
@@ -397,10 +395,6 @@ gotweb_init_querystring(struct querystring **qs)
 	(*qs)->index_page = 0;
 	(*qs)->index_page_str = NULL;
 	(*qs)->path = NULL;
-	(*qs)->prev = NULL;
-	(*qs)->prev_prev = NULL;
-	(*qs)->page = 0;
-	(*qs)->page_str = NULL;
 
 	return error;
 }
@@ -530,42 +524,9 @@ qa_found:
 				goto done;
 			}
 			break;
-		case PAGE:
-			if (strlen(value) == 0)
-				break;
-			(*qs)->page_str = strdup(value);
-			if ((*qs)->page_str == NULL) {
-				error = got_error_from_errno2("%s: strdup",
-				    __func__);
-				goto done;
-			}
-			(*qs)->page = strtonum(value, INT64_MIN, INT64_MAX,
-			    &errstr);
-			if (errstr) {
-				error = got_error_from_errno3("%s: strtonum %s",
-				    __func__, errstr);
-				goto done;
-			}
-			break;
 		case PATH:
 			(*qs)->path = strdup(value);
 			if ((*qs)->path == NULL) {
-				error = got_error_from_errno2("%s: strdup",
-				    __func__);
-				goto done;
-			}
-			break;
-		case PREV:
-			(*qs)->prev = strdup(value);
-			if ((*qs)->prev == NULL) {
-				error = got_error_from_errno2("%s: strdup",
-				    __func__);
-				goto done;
-			}
-			break;
-		case PREV_PREV:
-			(*qs)->prev_prev = strdup(value);
-			if ((*qs)->prev_prev == NULL) {
 				error = got_error_from_errno2("%s: strdup",
 				    __func__);
 				goto done;
@@ -603,10 +564,8 @@ gotweb_free_querystring(struct querystring *qs)
 		free(qs->file);
 		free(qs->folder);
 		free(qs->headref);
-		free(qs->page_str);
+		free(qs->index_page_str);
 		free(qs->path);
-		free(qs->prev);
-		free(qs->prev_prev);
 	}
 	free(qs);
 }
@@ -632,7 +591,7 @@ gotweb_free_transport(struct transport *t)
 	gotweb_free_querystring(t->qs);
 	if (t != NULL) {
 		free(t->next_id);
-		free(t->next_prev_id);
+		free(t->prev_id);
 	}
 	free(t);
 }
@@ -868,12 +827,11 @@ gotweb_render_navs(struct request *c)
 		}
 		break;
 	case BRIEFS:
-		if (qs->page > 0 && qs->prev) {
-			if (asprintf(&phref, "index_page=%d&page=%d&path=%s"
-			    "&action=briefs&commit=%s&prev=%s",
-			    qs->index_page, qs->page - 1, qs->path,
-			    qs->prev ? qs->prev : "",
-			    qs->prev_prev ? qs->prev_prev : "") == -1) {
+		if (t->prev_id) {
+			if (asprintf(&phref, "index_page=%d&&path=%s"
+			    "&action=briefs&commit=%s",
+			    qs->index_page, qs->path,
+			    t->prev_id) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -917,11 +875,9 @@ gotweb_render_navs(struct request *c)
 		break;
 	case BRIEFS:
 		if (t->next_id) {
-			if (asprintf(&nhref, "index_page=%d&page=%d&path=%s"
-			    "&action=briefs&commit=%s&prev=%s&prev_prev=%s",
-			    qs->index_page, qs->page + 1, qs->path,
-			    t->next_id, t->next_prev_id ? t->next_prev_id : "",
-			    qs->prev ? qs->prev : "") == -1) {
+			if (asprintf(&nhref, "index_page=%d&path=%s"
+			    "&action=briefs&commit=%s",
+			    qs->index_page, qs->path, t->next_id) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -1294,7 +1250,24 @@ gotweb_render_briefs(struct request *c)
 		newline = strchr(rc->commit_msg, '\n');
 		if (newline)
 			*newline = '\0';
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=diff&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rc->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
 		if (fcgi_gen_response(c, rc->commit_msg) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
 			goto done;
 		if (rc->refs_str) {
 			if (fcgi_gen_response(c,
@@ -1315,10 +1288,6 @@ gotweb_render_briefs(struct request *c)
 		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, qs->index_page_str) == -1)
-			goto done;
-		if (fcgi_gen_response(c, "&page=") == -1)
-			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1342,10 +1311,6 @@ gotweb_render_briefs(struct request *c)
 			goto done;
 		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&page=") == -1)
-			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
-			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
@@ -1364,6 +1329,8 @@ gotweb_render_briefs(struct request *c)
 			goto done;
 		if (fcgi_gen_response(c, "</div>\n") == -1)
 			goto done;
+		if (fcgi_gen_response(c, "<div id='dotted_line'></div>") == -1)
+			goto done;
 
 		free(age);
 		age = NULL;
@@ -1371,7 +1338,7 @@ gotweb_render_briefs(struct request *c)
 		gotweb_free_repo_commit(rc);
 	}
 
-	if (t->next_id || qs->page > 0) {
+	if (t->next_id) {
 		error = gotweb_render_navs(c);
 		if (error)
 			goto done;
@@ -1380,7 +1347,6 @@ gotweb_render_briefs(struct request *c)
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
 	fcgi_gen_response(c, "</div>\n");
-
 done:
 	return error;
 }
