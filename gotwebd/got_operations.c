@@ -267,7 +267,6 @@ got_get_repo_commit(struct request *c, struct repo_commit *repo_commit,
 		    got_object_commit_get_parent_ids(commit));
 		if (parent_id != NULL) {
 			id2 = got_object_id_dup(parent_id->id);
-			free (parent_id);
 			error = got_object_id_str(&repo_commit->parent_id, id2);
 			if (error)
 				return error;
@@ -488,10 +487,8 @@ got_get_repo_commits(struct request *c, int limit)
 				break;
 			chk_next = 1;
 		}
-		if (commit != NULL) {
+		if (commit)
 			got_object_commit_close(commit);
-			commit = NULL;
-		}
 	}
 done:
 	/*
@@ -520,7 +517,7 @@ done:
 	}
 err:
 	gotweb_free_repo_commit(repo_commit);
-	if (commit != NULL)
+	if (commit)
 		got_object_commit_close(commit);
 	if (graph)
 		got_commit_graph_close(graph);

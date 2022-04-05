@@ -1362,7 +1362,6 @@ gotweb_render_diff(struct request *c)
 	struct repo_commit *rc = NULL;
 	char *age = NULL, *author = NULL;
 
-
 	error = got_get_repo_commits(c, 1);
 	if (error)
 		return error;
