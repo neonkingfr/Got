@@ -71,7 +71,7 @@ got_get_repo_owner(char **owner, struct server *srv, char *dir)
 		if (*owner == NULL)
 			error = got_error_from_errno("strdup");
 	}
-	got_repo_close(repo);
+	error = got_repo_close(repo);
 	return error;
 }
 
@@ -114,6 +114,13 @@ got_get_repo_age(char **repo_age, struct server *srv, char *dir,
 		error = got_ref_resolve(&id, repo, re->ref);
 		if (error)
 			goto done;
+
+		/*
+		 * XXX: we have a performance issue here. once we run
+		 * got_object_open_as_commit, it slows everything down here for
+		 * some reason that I don't know at this point. This is really
+		 * only noticed on very large repos.
+		 */
 
 		error = got_object_open_as_commit(&commit, repo, id);
 		free(id);

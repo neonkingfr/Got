@@ -25,8 +25,11 @@
 #include <event.h>
 #include <imsg.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "got_error.h"
 
 #include "proc.h"
 #include "gotwebd.h"
@@ -126,8 +129,6 @@ fcgi_parse_record(uint8_t *buf, size_t n, struct request *c)
 		    ntohs(h->content_len), c, ntohs(h->id));
 		break;
 	case FCGI_STDIN:
-		fcgi_create_end_record(c);
-		break;
 	case FCGI_ABORT_REQUEST:
 		fcgi_create_end_record(c);
 		fcgi_cleanup_request(c);
@@ -223,7 +224,7 @@ fcgi_parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 			return;
 
 		if ((env_entry = malloc(sizeof(struct env_val))) == NULL) {
-			log_warn("cannot allocate env_entry");
+			log_warn("cannot malloc env_entry");
 			return;
 		}
 
@@ -301,7 +302,7 @@ fcgi_gen_response(struct request *c, char *data)
 		return;
 
 	if ((resp = calloc(1, sizeof(struct fcgi_response))) == NULL) {
-		log_warn("cannot malloc fcgi_response");
+		log_warn("cannot calloc fcgi_response");
 		return;
 	}
 
@@ -354,7 +355,7 @@ fcgi_create_end_record(struct request *c)
 	struct fcgi_end_request_body *end_request;
 
 	if ((resp = calloc(1, sizeof(struct fcgi_response))) == NULL) {
-		log_warn("cannot malloc fcgi_response");
+		log_warn("cannot calloc fcgi_response");
 		return;
 	}
 	header = (struct fcgi_record_header*) resp->data;
@@ -376,29 +377,36 @@ fcgi_create_end_record(struct request *c)
 	resp->data_len = sizeof(struct fcgi_end_request_body) +
 	    sizeof(struct fcgi_record_header);
 	fcgi_add_response(c, resp);
-	c->sock->request_loop = LOOP_FINISH;
 }
 
 void
 fcgi_cleanup_request(struct request *c)
 {
+	const struct got_error *error = NULL;
 	struct fcgi_response *resp;
+
+	c->sock->request_loop = LOOP_FINISH;
+
+	int errcode = pthread_join(c->thread, (void **)&error);
+	if (errcode) {
+		error = got_error_set_errno(errcode, "pthread_join");
+		log_warnx("%s", error->msg);
+	}
 
 	evtimer_del(&c->tmo);
 	if (event_initialized(&c->ev))
 		event_del(&c->ev);
-	close(c->fd);
 
+	close(c->fd);
 	while ((resp = TAILQ_FIRST(&c->response_head))) {
 		TAILQ_REMOVE(&c->response_head, resp, entry);
 		free(resp);
 	}
 
+	gotweb_free_transport(c->t);
+
 	LIST_REMOVE(c, entry);
-
-	if (! c->inflight_fds_accounted)
-		cgi_inflight--;
-
+	cgi_inflight--;
 	free(c);
 }
 

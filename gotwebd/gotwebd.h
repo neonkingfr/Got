@@ -148,6 +148,7 @@ TAILQ_HEAD(fcgi_response_head, fcgi_response);
 struct request {
 	LIST_ENTRY(request)		 entry;
 	struct socket			*sock;
+	struct transport		*t;
 	struct event			 ev;
 	struct event			 tmo;
 
@@ -167,8 +168,9 @@ struct request {
 	struct env_head			 env;
 	int				 env_count;
 
+	pthread_t			 thread;
+
 	uint8_t				 request_started;
-	int				 inflight_fds_accounted;
 };
 
 LIST_HEAD(requests_head, request);
@@ -211,7 +213,6 @@ struct transport {
 struct server {
 	TAILQ_ENTRY(server)	 entry;
 	struct addresslist	*al;
-	struct transport	*t;
 
 	char		 name[GOTWEBD_MAXTEXT];
 
@@ -283,14 +284,14 @@ struct socket {
 	struct requests_head	 requests;
 	struct socket_conf	 conf;
 
-	int		 fd;
-	int		 priv_fd;
+	int		  fd;
+	int		  priv_fd;
 
-	struct event	 evt;
-	struct event	 ev;
-	struct event	 pause;
+	struct event	  evt;
+	struct event	  ev;
+	struct event	  pause;
 
-	int		 request_loop;
+	int		  request_loop;
 };
 TAILQ_HEAD(socketlist, socket);
 
@@ -395,7 +396,9 @@ int	 sockets_privinit(struct gotwebd *, struct socket *);
 
 /* gotweb.c */
 void	 gotweb_process_request(struct request *);
+void	 gotweb_free_transport(struct transport *);
 const struct got_error	*gotweb_get_time_str(char **, time_t, int);
+const struct got_error	*gotweb_init_transport(struct transport **);
 
 /* parse.y */
 int	 parse_config(const char *, struct gotwebd *);

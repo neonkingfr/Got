@@ -49,6 +49,8 @@
 #include <unistd.h>
 #include <util.h>
 
+#include "got_error.h"
+
 #include "proc.h"
 #include "gotwebd.h"
 
@@ -96,9 +98,9 @@ sockets_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 
 	socket_rlimit(-1);
 
-	signal_del(&ps->ps_evsigchld);
-	signal_set(&ps->ps_evsigchld, SIGCHLD, sockets_sighdlr, ps);
-	signal_add(&ps->ps_evsigchld, NULL);
+	/* signal_del(&ps->ps_evsigchld); */
+	/* signal_set(&ps->ps_evsigchld, SIGCHLD, sockets_sighdlr, ps); */
+	/* signal_add(&ps->ps_evsigchld, NULL); */
 
 	if (pledge("stdio rpath inet recvfd proc exec sendfd", NULL) == -1)
 		fatal("pledge");
@@ -412,6 +414,7 @@ sockets_dispatch_gotwebd(int fd, struct privsep_proc *p, struct imsg *imsg)
 void
 sockets_sighdlr(int sig, short event, void *arg)
 {
+	log_info("%s", __func__);
 	switch (sig) {
 	case SIGHUP:
 		log_info("%s: ignoring SIGHUP", __func__);
@@ -647,13 +650,13 @@ sockets_accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 
 	if (getdtablecount() + reserve +
 	    ((*counter + 1) * FD_NEEDED) >= getdtablesize()) {
-		log_debug("inflight fds exceeded");
+		log_info("inflight fds exceeded");
 		errno = EMFILE;
 		return -1;
 	}
 
-	if ((ret = accept4(sockfd, addr, addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC))
-	    > -1) {
+	if ((ret = accept4(sockfd, addr, addrlen,
+	    SOCK_NONBLOCK | SOCK_CLOEXEC)) > -1) {
 		(*counter)++;
 		log_debug("inflight incremented, now %d", *counter);
 	}
@@ -664,6 +667,7 @@ sockets_accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 void
 sockets_accept_paused(int fd, short events, void *arg)
 {
+	log_info("%s", __func__);
 	struct socket *sock = (struct socket *)arg;
 
 	event_add(&sock->ev, NULL);
@@ -672,11 +676,11 @@ sockets_accept_paused(int fd, short events, void *arg)
 void
 sockets_socket_accept(int fd, short event, void *arg)
 {
+	const struct got_error *error = NULL;
 	struct socket *sock = (struct socket *)arg;
 	struct sockaddr_storage ss;
 	struct timeval backoff;
 	struct request *c = NULL;
-	pthread_t sock_resp_id;
 	socklen_t len;
 	int s, ecode;
 
@@ -691,6 +695,13 @@ sockets_socket_accept(int fd, short event, void *arg)
 
 	s = sockets_accept_reserve(fd, (struct sockaddr *)&ss, &len,
 	    FD_RESERVE, &cgi_inflight);
+
+	/* XXX: remove this */
+	log_info("table_count: %d, reserve: %d, cgi_inflight: %d, fd_needed: %d,  table_size: %d", getdtablecount(), FD_RESERVE,
+	    cgi_inflight + 1, FD_NEEDED, getdtablesize());
+	log_info("Total: %d", (getdtablecount() + FD_RESERVE +
+	    ((cgi_inflight + 1) * FD_NEEDED)));
+	/*******************/
 
 	if (s == -1) {
 		switch (errno) {
@@ -716,20 +727,25 @@ sockets_socket_accept(int fd, short event, void *arg)
 		return;
 	}
 
+	c->t = NULL;
+	error = gotweb_init_transport(&c->t);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		close(s);
+		cgi_inflight--;
+		return;
+	}
+
 	c->fd = s;
 	c->sock = sock;
 	c->priv_fd = sock->priv_fd;
 	c->buf_pos = 0;
 	c->buf_len = 0;
-	c->fd = s;
-	c->buf_pos = 0;
-	c->buf_len = 0;
 	c->request_started = 0;
-	c->inflight_fds_accounted = 0;
 	c->sock->request_loop = LOOP_START;
 	TAILQ_INIT(&c->response_head);
 
-	ecode = pthread_create(&sock_resp_id, NULL, sockets_start_responder,
+	ecode = pthread_create(&c->thread, NULL, sockets_start_responder,
 	    (void *)c);
 
 	if (ecode) {
@@ -754,36 +770,26 @@ sockets_start_responder(void *arg)
 	struct fcgi_response *resp;
 	ssize_t n;
 
-	log_debug("%s: started thread", __func__);
 	while (c->sock->request_loop > LOOP_END) {
-		if (TAILQ_EMPTY(&c->response_head))
+		if (TAILQ_EMPTY(&c->response_head) &&
+		    c->sock->request_loop == LOOP_FINISH)
+			break;
+		else if (TAILQ_EMPTY(&c->response_head))
 			continue;
 	    	resp = TAILQ_FIRST(&c->response_head);
 		header = (struct fcgi_record_header*) resp->data;
 		dump_fcgi_record("resp ", header);
 		n = write(c->fd, resp->data + resp->data_pos, resp->data_len);
-		if (n == -1) {
-			if (errno == EAGAIN || errno == EINTR)
-				goto done;
-			c->sock->request_loop = LOOP_END;
-			goto err;
-		}
+		/* we can't write, so exit */
+		if (n == -1)
+			break;
 		resp->data_pos += n;
 		resp->data_len -= n;
+
 		if (resp->data_len == 0 && c->sock->request_loop > LOOP_END) {
 			TAILQ_REMOVE(&c->response_head, resp, entry);
 			free(resp);
 		}
-
-		if ((c->sock->request_loop == LOOP_FINISH ||
-		    c->sock->request_loop == LOOP_END) &&
-		    TAILQ_EMPTY(&c->response_head))
-			break;
 	}
-done:
-	c->sock->request_loop = LOOP_END;
-	fcgi_cleanup_request(c);
-err:
-	log_debug("%s: closed thread", __func__);
 	return (void *)error;
 }

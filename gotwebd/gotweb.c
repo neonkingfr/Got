@@ -71,7 +71,7 @@ static const struct got_error *gotweb_assign_querystring(struct querystring **,
 static const struct got_error *gotweb_render_content_type(struct request *,
     uint8_t *);
 static const struct got_error *gotweb_render_header(struct request *,
-    struct server *, struct querystring *);
+    struct server *);
 static const struct got_error *gotweb_render_footer(struct request *,
     struct server *);
 static const struct got_error *gotweb_render_index(struct request *,
@@ -87,14 +87,10 @@ static const struct got_error *gotweb_get_clone_url(char **, struct server *,
     char *);
 static const struct got_error *gotweb_render_navs(struct request *,
     struct server *);
-static const struct got_error *gotweb_init_transport(struct transport **);
 
 static void	 gotweb_free_querystring(struct querystring *);
-static void	 gotweb_free_transport(struct transport *);
 
 struct server *gotweb_get_server(uint8_t *, uint8_t *);
-
-extern int cgi_inflight;
 
 enum gw_ref_tm {
 	TM_DIFF,
@@ -130,7 +126,6 @@ gotweb_process_request(struct request *c)
 {
 	const struct got_error *error = NULL;
 	struct server *srv;
-	FILE *f = NULL;
 	uint8_t err[] = "gotwebd experienced an error: ";
 	int erre = 0;
 
@@ -140,42 +135,30 @@ gotweb_process_request(struct request *c)
 		log_warnx("%s: error server is NULL", __func__);
 		goto err;
 	}
-	/* init t */
-	error = gotweb_init_transport(&srv->t);
-	if (error) {
-		log_warnx("%s: %s", __func__, error->msg);
-		goto err;
-	}
 	/* parse our querystring */
-	error = gotweb_init_querystring(&srv->t->qs);
+	error = gotweb_init_querystring(&c->t->qs);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
 		goto err;
 	}
-	error = gotweb_parse_querystring(&srv->t->qs, c->querystring);
+	error = gotweb_parse_querystring(&c->t->qs, c->querystring);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
-		goto err;
-	}
-	/* open our privileged fd */
-	f = gotweb_opentemp(c->priv_fd);
-	if (f == NULL) {
-		log_warnx("%s: error opening temp file", __func__);
 		goto err;
 	}
 
 	/* render top of page */
-	if (srv->t->qs != NULL && srv->t->qs->action == BLOB) {
+	if (c->t->qs != NULL && c->t->qs->action == BLOB) {
 		gotweb_render_content_type(c, "text/text");
 		/* got_render_blob; */
 		fcgi_gen_response(c, "render blob here");
 	} else
 		gotweb_render_content_type(c, "text/html");
 
-	gotweb_render_header(c, srv, srv->t->qs);
+	gotweb_render_header(c, srv);
 
-	if (srv->t->qs->action != INDEX) {
-		switch(srv->t->qs->action) {
+	if (c->t->qs->action != INDEX) {
+		switch(c->t->qs->action) {
 		default:
 			break;
 		}
@@ -197,15 +180,8 @@ err:
 	else
 		fcgi_gen_response(c, "see daemon logs for details");
 done:
-	if (f != NULL)
-		fclose(f);
-
 	if (srv != NULL && erre == 0)
 		gotweb_render_footer(c, srv);
-
-	gotweb_free_transport(srv->t);
-	cgi_inflight--;
-	c->inflight_fds_accounted = 1;
 }
 
 struct server *
@@ -234,14 +210,14 @@ done:
 	return srv;
 };
 
-static const struct got_error *
+const struct got_error *
 gotweb_init_transport(struct transport **t)
 {
 	const struct got_error *error = NULL;
 
-	*t = malloc(sizeof(**t));
+	*t = calloc(1, sizeof(**t));
 	if (*t == NULL)
-		return got_error_from_errno2("%s: malloc", __func__);
+		return got_error_from_errno2("%s: calloc", __func__);
 
 	(*t)->qs = NULL;
 	(*t)->next_id = NULL;
@@ -260,9 +236,9 @@ gotweb_init_querystring(struct querystring **qs)
 {
 	const struct got_error *error = NULL;
 
-	*qs = malloc(sizeof(**qs));
+	*qs = calloc(1, sizeof(**qs));
 	if (*qs == NULL)
-		return got_error_from_errno2("%s: malloc", __func__);
+		return got_error_from_errno2("%s: calloc", __func__);
 
 	(*qs)->action = INDEX;
 	(*qs)->commit = NULL;
@@ -437,7 +413,7 @@ gotweb_free_querystring(struct querystring *qs)
 	free(qs);
 }
 
-static void
+void
 gotweb_free_transport(struct transport *t)
 {
 	gotweb_free_querystring(t->qs);
@@ -484,10 +460,10 @@ done:
 }
 
 static const struct got_error *
-gotweb_render_header(struct request *c, struct server *srv,
-    struct querystring *qs)
+gotweb_render_header(struct request *c, struct server *srv)
 {
 	const struct got_error *error = NULL;
+	struct querystring *qs = c->t->qs;
 	char *title = NULL, *droot = NULL, *css = NULL, *gotlink = NULL;
 	char *gotimg = NULL, *sitelink = NULL;
 
@@ -622,7 +598,6 @@ gotweb_render_footer(struct request *c, struct server *srv)
 		fcgi_gen_response(c, "&nbsp;");
 	fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>");
 done:
-	fcgi_create_end_record(c);
 	free(siteowner);
 
 	return error;
@@ -637,8 +612,8 @@ gotweb_render_navs(struct request *c, struct server *srv)
 	fcgi_gen_response(c, "<div id='np_wrapper'>\n");
 	fcgi_gen_response(c, "<div id='nav_prev'>\n");
 
-	if (srv->t->qs->page > 0) {
-		if (asprintf(&ppage, "%d", srv->t->qs->page - 1) == -1) {
+	if (c->t->qs->page > 0) {
+		if (asprintf(&ppage, "%d", c->t->qs->page - 1) == -1) {
 			error = got_error_from_errno2("%s: asprintf", __func__);
 			goto done;
 		}
@@ -649,10 +624,10 @@ gotweb_render_navs(struct request *c, struct server *srv)
 	fcgi_gen_response(c, "</div>\n");
 	fcgi_gen_response(c, "<div id='nav_next'>\n");
 
-	if (srv->t->next_disp == srv->max_repos_display &&
-	    srv->t->repos_total != (srv->t->qs->page + 1) *
+	if (c->t->next_disp == srv->max_repos_display &&
+	    c->t->repos_total != (c->t->qs->page + 1) *
 	    srv->max_repos_display) {
-		if (asprintf(&npage, "%d", srv->t->qs->page + 1) == -1) {
+		if (asprintf(&npage, "%d", c->t->qs->page + 1) == -1) {
 			error = got_error_from_errno2("%s: asprintf", __func__);
 			goto done;
 		}
@@ -706,7 +681,7 @@ gotweb_render_index(struct request *c, struct server *srv)
 
 		if (lstat(c_path, &st) == 0 && S_ISDIR(st.st_mode) &&
 		    !got_path_dir_is_empty(c_path))
-		srv->t->repos_total++;
+		c->t->repos_total++;
 
 		free(c_path);
 		c_path = NULL;
@@ -733,9 +708,9 @@ gotweb_render_index(struct request *c, struct server *srv)
 		    strcmp(sd_dent[d_i]->d_name, "..") == 0)
 			continue;
 
-		if (srv->t->qs->page > 0 && (srv->t->qs->page *
-		    srv->max_repos_display) > srv->t->prev_disp) {
-			srv->t->prev_disp++;
+		if (c->t->qs->page > 0 && (c->t->qs->page *
+		    srv->max_repos_display) > c->t->prev_disp) {
+			c->t->prev_disp++;
 			continue;
 		}
 
@@ -753,7 +728,7 @@ gotweb_render_index(struct request *c, struct server *srv)
 
 		if (lstat(repo_dir->path, &st) == 0 && S_ISDIR(st.st_mode) &&
 		    !got_path_dir_is_empty(repo_dir->path)){
-			srv->t->repos_total++;
+			c->t->repos_total++;
 			goto render;
 		} else {
 			gotweb_free_repo_dir(repo_dir);
@@ -762,7 +737,7 @@ gotweb_render_index(struct request *c, struct server *srv)
 		}
 render:
 		d_disp++;
-		srv->t->prev_disp++;
+		c->t->prev_disp++;
 		fcgi_gen_response(c, "<div id='index_wrapper'>\n");
 		fcgi_gen_response(c, "<div id='index_project'>\n");
 
@@ -835,7 +810,7 @@ render:
 		gotweb_free_repo_dir(repo_dir);
 		repo_dir = NULL;
 
-		srv->t->next_disp++;
+		c->t->next_disp++;
 		if (d_disp == srv->max_repos_display)
 			break;
 	}
@@ -844,14 +819,14 @@ render:
 		goto done;
 	if (srv->max_repos > 0 && srv->max_repos < srv->max_repos_display)
 		goto done;
-	if (srv->t->repos_total <= srv->max_repos ||
-	    srv->t->repos_total <= srv->max_repos_display)
+	if (c->t->repos_total <= srv->max_repos ||
+	    c->t->repos_total <= srv->max_repos_display)
 		goto done;
 
 	gotweb_render_navs(c, srv);
 done:
 	fcgi_gen_response(c, "</div>\n");
-	if (d && closedir(d) == -1 && error == NULL)
+	if (d != NULL && closedir(d) == EOF && error == NULL)
 		error = got_error_from_errno("closedir");
 	return error;
 }
@@ -986,6 +961,10 @@ done:
 	    repo_dir->path);
 	if (error)
 		goto errored;
+
+	/*********************************************************/
+	/* fds are not getting cleared with got_repo_close. WTF? */
+
 	error = got_get_repo_owner(&repo_dir->owner, srv, repo_dir->path);
 	if (error)
 		goto errored;
@@ -993,11 +972,14 @@ done:
 	    NULL, TM_DIFF);
 	if (error)
 		goto errored;
+
+	/*********************************************************/
+
 	error = gotweb_get_clone_url(&repo_dir->url, srv, repo_dir->path);
 errored:
 	free(dir_test);
 	if (opened)
-		if (dt && closedir(dt) == -1 && error == NULL)
+		if (dt != NULL && closedir(dt) == EOF && error == NULL)
 			error = got_error_from_errno("closedir");
 	return error;
 }
@@ -1007,9 +989,9 @@ gotweb_init_repo_dir(struct repo_dir **repo_dir, const char *dir)
 {
 	const struct got_error *error;
 
-	*repo_dir = malloc(sizeof(**repo_dir));
+	*repo_dir = calloc(1, sizeof(**repo_dir));
 	if (*repo_dir == NULL)
-		return got_error_from_errno("malloc");
+		return got_error_from_errno("calloc");
 
 	if (asprintf(&(*repo_dir)->name, "%s", dir) == -1) {
 		error = got_error_from_errno("asprintf");
@@ -1134,7 +1116,7 @@ gotweb_get_clone_url(char **url, struct server *srv, char *dir)
 	if (n == 0 && ferror(f))
 		error = got_ferror(f, GOT_ERR_IO);
 done:
-	if (f && fclose(f) == EOF && error == NULL)
+	if (f != NULL && fclose(f) == EOF && error == NULL)
 		error = got_error_from_errno("fclose");
 	free(d_file);
 	return NULL;
