@@ -228,7 +228,7 @@ got_get_repo_commit(struct request *c, struct repo_commit *repo_commit,
 		return error;
 
 	if (qs->action == DIFF) {
-		parent_id = SIMPLEQ_FIRST(
+		parent_id = STAILQ_FIRST(
 		    got_object_commit_get_parent_ids(commit));
 		if (parent_id != NULL) {
 			id2 = got_object_id_dup(parent_id->id);
@@ -312,7 +312,8 @@ got_get_repo_commits(struct request *c, int limit)
 	c->t->repo = repo;
 
 	if (qs->commit == NULL || qs->action == COMMITS ||
-	    qs->action == BRIEFS || qs->action == SUMMARY) {
+	    qs->action == BRIEFS || qs->action == SUMMARY ||
+	    qs->action == TAGS) {
 		error = got_ref_open(&ref, repo, t->headref, 0);
 		if (error)
 			goto err;
