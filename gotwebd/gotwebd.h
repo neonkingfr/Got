@@ -155,8 +155,7 @@ struct repo_dir {
 
 struct repo_commit {
 	TAILQ_ENTRY(repo_commit)	 entry;
-	char				*path;
-
+	char			*path;
 	char			*refs_str;
 	char			*commit_id; /* id_str1 */
 	char			*parent_id; /* id_str2 */
@@ -169,7 +168,7 @@ struct repo_commit {
 
 struct got_repository;
 struct transport {
-	TAILQ_HEAD(repo_commits, repo_commit) repo_commits;
+	TAILQ_HEAD(repo_head, repo_commit) repo_commits;
 	struct got_repository	*repo;
 	struct repo_dir		*repo_dir;
 	struct querystring	*qs;
@@ -179,7 +178,6 @@ struct transport {
 	unsigned int		 repos_total;
 	unsigned int		 next_disp;
 	unsigned int		 prev_disp;
-	int			 last_commit;
 };
 
 struct request {
@@ -404,6 +402,7 @@ void gotweb_process_request(struct request *);
 void gotweb_free_transport(struct transport *);
 const struct got_error *gotweb_get_time_str(char **, time_t, int);
 const struct got_error *gotweb_init_transport(struct transport **);
+void gotweb_free_repo_commit(struct repo_commit *);
 
 /* parse.y */
 int parse_config(const char *, struct gotwebd *);

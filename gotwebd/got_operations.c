@@ -270,7 +270,6 @@ got_get_repo_commit(struct request *c, struct repo_commit *repo_commit,
 		commit_msg++;
 
 	repo_commit->commit_msg = strdup(commit_msg);
-
 	if (repo_commit->commit_msg == NULL)
 		error = got_error_from_errno("strdup");
 	free(commit_msg0);
@@ -286,13 +285,15 @@ got_get_repo_commits(struct request *c, int limit)
 	struct got_commit_graph *graph = NULL;
 	struct got_commit_object *commit = NULL;
 	struct got_reflist_head refs;
-	struct repo_commit *repo_commit = NULL;
+	struct got_reference *ref;
+	struct repo_commit *repo_commit = NULL, *r_s = NULL;
 	struct server *srv = c->srv;
 	struct transport *t = c->t;
 	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = c->t->repo_dir;
 	char *in_repo_path = NULL, *repo_path = NULL;
-	int chk_next = 0, chk_multi = 0;
+	int chk_next = 0, chk_multi = 0, commit_found = 0, c_cnt = 0;
+	int obj_type;
 
 	TAILQ_INIT(&refs);
 
@@ -306,43 +307,37 @@ got_get_repo_commits(struct request *c, int limit)
 
 	error = got_repo_open(&repo, repo_path, NULL);
 	if (error)
-		goto done;
+		goto err;
 
 	c->t->repo = repo;
 
-	if (qs->commit == NULL) {
-		struct got_reference *head_ref;
-		error = got_ref_open(&head_ref, repo, t->headref, 0);
+	if (qs->commit == NULL || qs->action == COMMITS ||
+	    qs->action == BRIEFS || qs->action == SUMMARY) {
+		error = got_ref_open(&ref, repo, t->headref, 0);
 		if (error)
-			return error;
-		t->last_commit = 1;
-		error = got_ref_resolve(&id, repo, head_ref);
-		got_ref_close(head_ref);
+			goto err;
+		error = got_ref_resolve(&id, repo, ref);
 		if (error)
-			return error;
+			goto err;
 	} else {
-		struct got_reference *ref;
-
 		error = got_ref_open(&ref, repo, qs->commit, 0);
 		if (error == NULL) {
-			int obj_type;
 			error = got_ref_resolve(&id, repo, ref);
-			got_ref_close(ref);
 			if (error)
-				return error;
+				goto err;
 			error = got_object_get_type(&obj_type, repo, id);
 			if (error)
-				goto done;
+				goto err;
 			if (obj_type == GOT_OBJ_TYPE_TAG) {
 				struct got_tag_object *tag;
 				error = got_object_open_as_tag(&tag, repo, id);
 				if (error)
-					goto done;
+					goto err;
 				if (got_object_tag_get_object_type(tag) !=
 				    GOT_OBJ_TYPE_COMMIT) {
 					got_object_tag_close(tag);
 					error = got_error(GOT_ERR_OBJ_TYPE);
-					goto done;
+					goto err;
 				}
 				free(id);
 				id = got_object_id_dup(
@@ -352,41 +347,41 @@ got_get_repo_commits(struct request *c, int limit)
 					    "got_object_id_dup");
 				got_object_tag_close(tag);
 				if (error)
-					goto done;
+					goto err;
 			} else if (obj_type != GOT_OBJ_TYPE_COMMIT) {
 				error = got_error(GOT_ERR_OBJ_TYPE);
-				goto done;
+				goto err;
 			}
 		}
 		error = got_repo_match_object_id_prefix(&id, qs->commit,
 		    GOT_OBJ_TYPE_COMMIT, repo);
 		if (error)
-			goto done;
+			goto err;
 	}
 
 	error = got_repo_map_path(&in_repo_path, repo, repo_path);
 	if (error)
-		goto done;
+		goto err;
 
 	if (in_repo_path) {
 		repo_commit->path = strdup(in_repo_path);
 		if (repo_commit->path == NULL) {
 			error = got_error_from_errno("strdup");
-			goto done;
+			goto err;
 		}
 	}
 
 	error = got_ref_list(&refs, repo, NULL, got_ref_cmp_by_name, NULL);
 	if (error)
-		goto done;
+		goto err;
 
 	error = got_commit_graph_open(&graph, repo_commit->path, 0);
 	if (error)
-		goto done;
+		goto err;
 
 	error = got_commit_graph_iter_start(graph, id, repo, NULL, NULL);
 	if (error)
-		goto done;
+		goto err;
 
 	for (;;) {
 		error = got_commit_graph_iter_next(&id, graph, repo, NULL,
@@ -394,87 +389,119 @@ got_get_repo_commits(struct request *c, int limit)
 		if (error) {
 			if (error->code == GOT_ERR_ITER_COMPLETED)
 				error = NULL;
-			goto done;
+			goto err;
 		}
 		if (id == NULL)
-			goto done;
+			goto err;
 
 		error = got_object_open_as_commit(&commit, repo, id);
 		if (error)
-			goto done;
+			goto err;
+
 		if (limit == 1 && chk_multi == 0 &&
 		    srv->max_commits_display != 1) {
 			error = got_get_repo_commit(c, repo_commit, commit,
 			    &refs, id);
 			if (error)
-				goto done;
+				goto err;
+			TAILQ_INSERT_TAIL(&t->repo_commits, repo_commit,
+			    entry);
+			commit_found = 1;
 		} else {
 			chk_multi = 1;
 			struct repo_commit *new_repo_commit = NULL;
 			error = got_init_repo_commit(&new_repo_commit);
 			if (error)
-				goto done;
+				goto err;
+
+			TAILQ_INSERT_TAIL(&t->repo_commits, new_repo_commit,
+			    entry);
+
 			error = got_ref_list(&refs, repo, NULL,
 			    got_ref_cmp_by_name, NULL);
 			if (error)
-				goto done;
+				goto err;
 
 			error = got_get_repo_commit(c, new_repo_commit, commit,
 			    &refs, id);
 			if (error)
-				goto done;
+				goto err;
 
-			got_ref_list_free(&refs);
+			if (qs->commit != NULL) {
+				if (strcmp(qs->commit,
+				    new_repo_commit->commit_id) == 0)
+					commit_found = 1;
 
-			/*
-			 * we have a commit_id now, so copy it to next_prev_id
-			 * for navigation through briefs and commits
-			 */
-			if (t->prev_id == NULL && t->last_commit == 0 &&
-			    (qs->action == BRIEFS || qs->action == COMMITS ||
-			     qs->action == SUMMARY)) {
-				t->prev_id =
-				    strdup(new_repo_commit->commit_id);
-				if (t->prev_id == NULL) {
-					error = got_error_from_errno("strdup");
-					goto done;
-				}
-			}
+			} else
+				commit_found = 1;
 
 			/*
 			 * check for one more commit before breaking,
-			 * so we know whether to navicate through gw_briefs
-			 * gw_commits and gw_summary
+			 * so we know whether to navicate through briefs
+			 * commits and summary
 			 */
 			if (chk_next && (qs->action == BRIEFS ||
 			    qs->action == COMMITS || qs->action == SUMMARY)) {
 				t->next_id = strdup(new_repo_commit->commit_id);
-				if (t->next_id == NULL)
+				if (t->next_id == NULL) {
 					error = got_error_from_errno("strdup");
+					goto err;
+				}
+				TAILQ_REMOVE(&t->repo_commits, new_repo_commit,
+				    entry);
+				gotweb_free_repo_commit(new_repo_commit);
 				goto done;
 			}
-
-			TAILQ_INSERT_TAIL(&t->repo_commits, new_repo_commit,
-			    entry);
 		}
-		if (error || (limit && --limit == 0)) {
+		got_ref_list_free(&refs);
+		if (commit_found && (error || (limit && --limit == 0))) {
 			if (chk_multi == 0)
 				break;
 			chk_next = 1;
 		}
 		if (commit != NULL)
 			got_object_commit_close(commit);
+		free(id);
+		id = NULL;
+
 	}
 done:
+	/*
+	 * we have tailq populated, so find previous commit id
+	 * for navigation through briefs and commits
+	 */
+	if (t->prev_id == NULL && qs->commit != NULL &&
+	    (qs->action == BRIEFS || qs->action == COMMITS ||
+	     qs->action == SUMMARY)) {
+		commit_found = 0;
+		TAILQ_FOREACH_REVERSE(r_s, &t->repo_commits, repo_head,
+		    entry) {
+			if (commit_found == 0 &&
+			    strcmp(qs->commit, r_s->commit_id) != 0) {
+				continue;
+			} else
+				commit_found = 1;
+			if (c_cnt == srv->max_commits_display ||
+			    r_s == TAILQ_FIRST(&t->repo_commits)) {
+				t->prev_id = strdup(r_s->commit_id);
+				if (t->prev_id == NULL)
+					error = got_error_from_errno("strdup");
+				break;
+			}
+			c_cnt++;
+		}
+	}
+err:
+	if (ref)
+		got_ref_close(ref);
 	if (commit != NULL)
 		got_object_commit_close(commit);
 	if (graph)
 		got_commit_graph_close(graph);
 	got_ref_list_free(&refs);
-	free(id);
+	got_repo_close(repo);
 	free(repo_path);
-	free(in_repo_path);
-	error = got_repo_close(repo);
+	free(id);
 	return error;
 }
 

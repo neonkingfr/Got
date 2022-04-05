@@ -111,7 +111,6 @@ static const struct got_error *gotweb_render_tag(struct request *);
 static const struct got_error *gotweb_render_tags(struct request *);
 static const struct got_error *gotweb_render_tree(struct request *);
 
-static void gotweb_free_commit(struct repo_commit *);
 static void gotweb_free_querystring(struct querystring *);
 static void gotweb_free_repo_dir(struct repo_dir *);
 
@@ -373,7 +372,6 @@ gotweb_init_transport(struct transport **t)
 	(*t)->next_disp = 0;
 	(*t)->prev_disp = 0;
 	(*t)->headref = GOT_REF_HEAD;
-	(*t)->last_commit = 0;
 
 	return error;
 }
@@ -540,17 +538,17 @@ done:
 	return error;
 }
 
-static void
+void
 gotweb_free_repo_commit(struct repo_commit *rc)
 {
 	if (rc != NULL) {
 		free(rc->path);
-		free(rc->author);
-		free(rc->committer);
 		free(rc->refs_str);
 		free(rc->commit_id);
 		free(rc->parent_id);
 		free(rc->tree_id);
+		free(rc->author);
+		free(rc->committer);
 		free(rc->commit_msg);
 	}
 	free(rc);
@@ -587,6 +585,12 @@ gotweb_free_repo_dir(struct repo_dir *repo_dir)
 void
 gotweb_free_transport(struct transport *t)
 {
+	struct repo_commit *rc = NULL, *trc = NULL;
+
+	TAILQ_FOREACH_SAFE(rc, &t->repo_commits, entry, trc) {
+		TAILQ_REMOVE(&t->repo_commits, rc, entry);
+		gotweb_free_repo_commit(rc);
+	}
 	gotweb_free_repo_dir(t->repo_dir);
 	gotweb_free_querystring(t->qs);
 	if (t != NULL) {
@@ -827,7 +831,8 @@ gotweb_render_navs(struct request *c)
 		}
 		break;
 	case BRIEFS:
-		if (t->prev_id) {
+		if (t->prev_id && qs->commit != NULL &&
+		    strcmp(qs->commit, t->prev_id) != 0) {
 			if (asprintf(&phref, "index_page=%d&&path=%s"
 			    "&action=briefs&commit=%s",
 			    qs->index_page, qs->path,
@@ -1194,13 +1199,14 @@ static const struct got_error *
 gotweb_render_briefs(struct request *c)
 {
 	const struct got_error *error = NULL;
-	struct repo_commit *rc = NULL, *trc = NULL;
+	struct repo_commit *rc = NULL;
 	struct server *srv = c->srv;
 	struct transport *t = c->t;
 	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = t->repo_dir;
 	char *smallerthan, *newline;
 	char *age = NULL;
+	int commit_found = 0;
 
 	if (fcgi_gen_response(c, "<div id='briefs_title_wrapper'>\n") == -1)
 		goto done;
@@ -1223,7 +1229,13 @@ gotweb_render_briefs(struct request *c)
 	if (error)
 		goto done;
 
-	TAILQ_FOREACH_SAFE(rc, &t->repo_commits, entry, trc) {
+	TAILQ_FOREACH(rc, &t->repo_commits, entry) {
+		if (commit_found == 0 && qs->commit != NULL) {
+			if (strcmp(qs->commit, rc->commit_id) != 0)
+				continue;
+			else
+				commit_found = 1;
+		}
 		error = gotweb_get_time_str(&age, rc->committer_time, TM_DIFF);
 		if (error)
 			goto done;
@@ -1334,11 +1346,9 @@ gotweb_render_briefs(struct request *c)
 
 		free(age);
 		age = NULL;
-		TAILQ_REMOVE(&t->repo_commits, rc, entry);
-		gotweb_free_repo_commit(rc);
 	}
 
-	if (t->next_id) {
+	if (t->next_id || t->prev_id) {
 		error = gotweb_render_navs(c);
 		if (error)
 			goto done;
