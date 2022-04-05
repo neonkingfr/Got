@@ -103,6 +103,7 @@ static const struct got_error *gotweb_render_summary(struct request *);
 static const struct got_error *gotweb_render_tag(struct request *);
 static const struct got_error *gotweb_render_tags(struct request *);
 static const struct got_error *gotweb_render_tree(struct request *);
+static const struct got_error *gotweb_render_branches(struct request *);
 
 static void gotweb_free_querystring(struct querystring *);
 static void gotweb_free_repo_dir(struct repo_dir *);
@@ -1587,6 +1588,183 @@ done:
 }
 
 static const struct got_error *
+gotweb_render_branches(struct request *c)
+{
+	const struct got_error *error = NULL;
+	struct got_reflist_head refs;
+	struct got_reflist_entry *re;
+	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
+	struct got_repository *repo = t->repo;
+	char *age = NULL;
+
+	TAILQ_INIT(&refs);
+
+	error = got_ref_list(&refs, repo, "refs/heads",
+	    got_ref_cmp_by_name, NULL);
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='branches_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='branches_title'>Branches</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='branches_content'>\n") == -1)
+		goto done;
+
+	TAILQ_FOREACH(re, &refs, entry) {
+		char *refname = NULL;
+
+		if (got_ref_is_symbolic(re->ref))
+			continue;
+
+		refname = strdup(got_ref_get_name(re->ref));
+		if (refname == NULL) {
+			error = got_error_from_errno("strdup");
+			goto done;
+		}
+		if (strncmp(refname, "refs/heads/", 11) != 0)
+			continue;
+
+		error = got_get_repo_age(&age, c, qs->path, refname,
+		    TM_DIFF);
+		if (error)
+			goto done;
+
+		if (strncmp(refname, "refs/heads/", 11) == 0)
+			refname += 11;
+
+		if (fcgi_gen_response(c, "<div id='branches_wrapper'>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='branches_age'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, age ? age : "") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='branches_space'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&nbsp;") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='branch'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->path) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=summary&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, refname) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, refname) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='navs_wrapper'>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='navs'>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->path) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=summary&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, refname) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "summary") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, " | ") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->path) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=briefs&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, refname) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "commit briefs") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, " | ") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->path) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=commits&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, refname) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "commits") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c,
+		    "<div id='dotted_line'></div>\n") == -1)
+			goto done;
+
+		free(age);
+		age = NULL;
+
+	}
+	fcgi_gen_response(c, "</div>\n");
+done:
+	return error;
+}
+
+static const struct got_error *
 gotweb_render_tree(struct request *c)
 {
 	const struct got_error *error = NULL;
@@ -1863,6 +2041,12 @@ content:
 	}
 
 	error = gotweb_render_tags(c);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		goto done;
+	}
+
+	error = gotweb_render_branches(c);
 	if (error)
 		log_warnx("%s: %s", __func__, error->msg);
 done:
