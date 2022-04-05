@@ -46,6 +46,8 @@ static const struct got_error *got_get_repo_commit(struct request *,
     struct got_object_id *);
 static const struct got_error *got_gotweb_opentemp(FILE **, int *, int *);
 static const struct got_error *got_gotweb_flushtemp(FILE *, int);
+static const struct got_error *got_blame_cb(void *, int, int,
+    struct got_object_id *);
 
 static int
 isbinary(const uint8_t *buf, size_t n)
@@ -1081,7 +1083,7 @@ done:
 }
 
 const struct got_error *
-got_output_repo_blob(struct request *c)
+got_output_file_blob(struct request *c)
 {
 	const struct got_error *error = NULL;
 	struct transport *t = c->t;
@@ -1192,6 +1194,290 @@ done:
 	free(commit_id);
 	free(obj_id);
 	free(path);
+	if (blob)
+		got_object_blob_close(blob);
+	return error;
+}
+
+struct blame_line {
+	int annotated;
+	char *id_str;
+	char *committer;
+	char datebuf[11]; /* YYYY-MM-DD + NUL */
+};
+
+struct blame_cb_args {
+	struct blame_line *lines;
+	int nlines;
+	int nlines_prec;
+	int lineno_cur;
+	off_t *line_offsets;
+	FILE *f;
+	struct got_repository *repo;
+	struct request *c;
+};
+
+static const struct got_error *
+got_blame_cb(void *arg, int nlines, int lineno, struct got_object_id *id)
+{
+	const struct got_error *err = NULL;
+	struct blame_cb_args *a = arg;
+	struct blame_line *bline;
+	struct request *c = a->c;
+	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
+	struct repo_dir *repo_dir = t->repo_dir;
+	char *line = NULL;
+	size_t linesize = 0;
+	struct got_commit_object *commit = NULL;
+	off_t offset;
+	struct tm tm;
+	time_t committer_time;
+
+	if (nlines != a->nlines ||
+	    (lineno != -1 && lineno < 1) || lineno > a->nlines)
+		return got_error(GOT_ERR_RANGE);
+
+	if (lineno == -1)
+		return NULL; /* no change in this commit */
+
+	/* Annotate this line. */
+	bline = &a->lines[lineno - 1];
+	if (bline->annotated)
+		return NULL;
+	err = got_object_id_str(&bline->id_str, id);
+	if (err)
+		return err;
+
+	err = got_object_open_as_commit(&commit, a->repo, id);
+	if (err)
+		goto done;
+
+	bline->committer = strdup(got_object_commit_get_committer(commit));
+	if (bline->committer == NULL) {
+		err = got_error_from_errno("strdup");
+		goto done;
+	}
+
+	committer_time = got_object_commit_get_committer_time(commit);
+	if (gmtime_r(&committer_time, &tm) == NULL)
+		return got_error_from_errno("gmtime_r");
+	if (strftime(bline->datebuf, sizeof(bline->datebuf), "%G-%m-%d",
+	    &tm) == 0) {
+		err = got_error(GOT_ERR_NO_SPACE);
+		goto done;
+	}
+	bline->annotated = 1;
+
+	/* Print lines annotated so far. */
+	bline = &a->lines[a->lineno_cur - 1];
+	if (!bline->annotated)
+		goto done;
+
+	offset = a->line_offsets[a->lineno_cur - 1];
+	if (fseeko(a->f, offset, SEEK_SET) == -1) {
+		err = got_error_from_errno("fseeko");
+		goto done;
+	}
+
+	while (bline->annotated) {
+		int out_buff_size = 100;
+		char *smallerthan, *at, *nl, *committer;
+		char out_buff[out_buff_size];
+		size_t len;
+
+		if (getline(&line, &linesize, a->f) == -1) {
+			if (ferror(a->f))
+				err = got_error_from_errno("getline");
+			break;
+		}
+
+		committer = bline->committer;
+		smallerthan = strchr(committer, '<');
+		if (smallerthan && smallerthan[1] != '\0')
+			committer = smallerthan + 1;
+		at = strchr(committer, '@');
+		if (at)
+			*at = '\0';
+		len = strlen(committer);
+		if (len >= 9)
+			committer[8] = '\0';
+
+		nl = strchr(line, '\n');
+		if (nl)
+			*nl = '\0';
+
+		if (fcgi_gen_response(c, "<div id='blame_wrapper'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='blame_number'>") == -1)
+			goto done;
+		if (snprintf(out_buff, strlen(out_buff), "%.*d", a->nlines_prec,
+		    a->lineno_cur) < 0)
+			goto done;
+		if (fcgi_gen_response(c, out_buff) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='blame_hash'>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=diff&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, bline->id_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (snprintf(out_buff, 10, "%.8s", bline->id_str) < 0)
+			goto done;
+		if (fcgi_gen_response(c, out_buff) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a></div>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='blame_date'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, bline->datebuf) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='blame_author'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, committer) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='blame_code'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, line) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "</div>") == -1)
+			goto done;
+		a->lineno_cur++;
+		bline = &a->lines[a->lineno_cur - 1];
+	}
+done:
+	if (commit)
+		got_object_commit_close(commit);
+	free(line);
+	return err;
+}
+
+const struct got_error *
+got_output_file_blame(struct request *c)
+{
+	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
+	struct querystring *qs = c->t->qs;
+	struct got_object_id *obj_id = NULL;
+	struct got_object_id *commit_id = NULL;
+	struct got_reflist_head refs;
+	struct got_blob_object *blob = NULL;
+	char *path = NULL, *in_repo_path = NULL;
+	struct blame_cb_args bca;
+	int i, obj_type, fd;
+	off_t filesize;
+
+	TAILQ_INIT(&refs);
+
+	error = got_gotweb_opentemp(&bca.f, &c->priv_fd, &fd);
+	if (error)
+		goto done;
+
+	if (asprintf(&path, "%s%s%s", qs->folder ? qs->folder : "",
+	    qs->folder ? "/" : "", qs->file) == -1) {
+		error = got_error_from_errno("asprintf");
+		goto done;
+	}
+
+	error = got_repo_map_path(&in_repo_path, repo, path);
+	if (error)
+		goto done;
+
+	error = got_repo_match_object_id(&commit_id, NULL, qs->commit,
+	    GOT_OBJ_TYPE_COMMIT, &refs, repo);
+	if (error)
+		goto done;
+
+	error = got_object_id_by_path(&obj_id, repo, commit_id, in_repo_path);
+	if (error)
+		goto done;
+
+	if (obj_id == NULL) {
+		error = got_error(GOT_ERR_NO_OBJ);
+		goto done;
+	}
+
+	error = got_object_get_type(&obj_type, repo, obj_id);
+	if (error)
+		goto done;
+
+	if (obj_type != GOT_OBJ_TYPE_BLOB) {
+		error = got_error(GOT_ERR_OBJ_TYPE);
+		goto done;
+	}
+
+	error = got_object_open_as_blob(&blob, repo, obj_id, BUF);
+	if (error)
+		goto done;
+
+	error = got_object_blob_dump_to_file(&filesize, &bca.nlines,
+	    &bca.line_offsets, bca.f, blob);
+	if (error || bca.nlines == 0)
+		goto done;
+
+	/* Don't include \n at EOF in the blame line count. */
+	if (bca.line_offsets[bca.nlines - 1] == filesize)
+		bca.nlines--;
+
+	bca.lines = calloc(bca.nlines, sizeof(*bca.lines));
+	if (bca.lines == NULL) {
+		error = got_error_from_errno("calloc");
+		goto done;
+	}
+	bca.lineno_cur = 1;
+	bca.nlines_prec = 0;
+	i = bca.nlines;
+	while (i > 0) {
+		i /= 10;
+		bca.nlines_prec++;
+	}
+	bca.repo = repo;
+	bca.c = c;
+
+	error = got_blame(in_repo_path, commit_id, repo, got_blame_cb, &bca,
+	    NULL, NULL);
+
+	error = got_gotweb_flushtemp(bca.f, fd);
+done:
+	free(in_repo_path);
+	free(commit_id);
+	free(obj_id);
+	free(path);
+
+	if (blob) {
+		free(bca.line_offsets);
+		for (i = 0; i < bca.nlines; i++) {
+			struct blame_line *bline = &bca.lines[i];
+			free(bline->id_str);
+			free(bline->committer);
+		}
+		free(bca.lines);
+	}
 	if (blob)
 		got_object_blob_close(blob);
 	return error;

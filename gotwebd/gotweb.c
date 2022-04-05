@@ -162,7 +162,7 @@ gotweb_process_request(struct request *c)
 		error = got_get_repo_commits(c, 1);
 		if (error)
 			goto done;
-		error = got_output_repo_blob(c);
+		error = got_output_file_blob(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
@@ -1254,6 +1254,71 @@ static const struct got_error *
 gotweb_render_blame(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct repo_commit *rc = NULL;
+	char *age = NULL;
+
+	error = got_get_repo_commits(c, 1);
+	if (error)
+		return error;
+
+	rc = TAILQ_FIRST(&t->repo_commits);
+
+	error = gotweb_get_time_str(&age, rc->committer_time, TM_LONG);
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='blame_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='blame_title'>Blame</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='blame_content'>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='blame_header_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='blame_header'>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_age_title'>Date:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_age'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, age ? age : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_commit_msg_title'>Message:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_commit_msg'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->commit_msg) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='dotted_line'></div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='blame'>\n") == -1)
+		goto done;
+
+	error = got_output_file_blame(c);
+	if (error)
+		goto done;
+
+	fcgi_gen_response(c, "</div>\n");
+done:
 	return error;
 }
 

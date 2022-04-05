@@ -436,7 +436,8 @@ const struct got_error *got_get_repo_tags(struct request *, int);
 const struct got_error *got_get_repo_heads(struct request *);
 const struct got_error *got_output_repo_diff(struct request *);
 const struct got_error *got_output_repo_tree(struct request *);
-const struct got_error *got_output_repo_blob(struct request *);
+const struct got_error *got_output_file_blob(struct request *);
+const struct got_error *got_output_file_blame(struct request *);
 
 /* config.c */
 int config_setserver(struct gotwebd *, struct server *);
