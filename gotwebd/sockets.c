@@ -773,7 +773,9 @@ sockets_start_responder(void *arg)
 			TAILQ_REMOVE(&c->response_head, resp, entry);
 			free(resp);
 		}
-		if (c->sock->request_loop == LOOP_FINISH &&
+
+		if ((c->sock->request_loop == LOOP_FINISH ||
+		    c->sock->request_loop == LOOP_END) &&
 		    TAILQ_EMPTY(&c->response_head))
 			break;
 	}
