@@ -185,8 +185,7 @@ got_get_repo_commit(struct request *c, struct repo_commit *repo_commit,
 		if (error)
 			return error;
 		if (strncmp(name, "tags/", 5) == 0) {
-			error = got_object_open_as_tag(&tag, t->repo,
-			    ref_id);
+			error = got_object_open_as_tag(&tag, t->repo, ref_id);
 			if (error) {
 				if (error->code != GOT_ERR_OBJ_TYPE) {
 					free(ref_id);
