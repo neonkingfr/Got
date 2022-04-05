@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, 2020-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019, 2020-2022 Tracey Emery <tracey@traceyemery.net>
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
  * Copyright (c) 2013 Florian Obser <florian@openbsd.org>
