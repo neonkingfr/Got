@@ -1209,6 +1209,8 @@ static const struct got_error *
 gotweb_render_briefs(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+
 	if (fcgi_gen_response(c, "<div id='briefs_title_wrapper'>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c,
