@@ -1399,6 +1399,10 @@ gotweb_render_briefs(struct request *c)
 			goto done;
 		if (fcgi_gen_response(c, rc->commit_id) == -1)
 			goto done;
+		if (fcgi_gen_response(c, "&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->headref) == -1)
+			goto done;
 		if (fcgi_gen_response(c, "'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, rc->commit_msg) == -1)
@@ -1432,6 +1436,10 @@ gotweb_render_briefs(struct request *c)
 		if (fcgi_gen_response(c, "&action=diff&commit=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, rc->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->headref) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "'>") == -1)
 			goto done;
