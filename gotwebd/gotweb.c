@@ -1217,9 +1217,10 @@ gotweb_render_briefs(struct request *c)
 	if (fcgi_gen_response(c, "<div id='briefs_wrapper'>\n") == -1)
 		goto done;
 
-	if (qs->action == SUMMARY)
+	if (qs->action == SUMMARY) {
+		qs->action = BRIEFS;
 		error = got_get_repo_commits(c, D_MAXSLCOMMDISP);
-	else
+	} else
 		error = got_get_repo_commits(c, srv->max_commits_display);
 	if (error)
 		goto done;
@@ -1431,6 +1432,14 @@ content:
 		goto done;
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
+
+	error = gotweb_render_briefs(c);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		goto done;
+	}
+
+
 
 done:
 	return error;
