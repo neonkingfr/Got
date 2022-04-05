@@ -289,7 +289,7 @@ got_get_repo_commits(struct request *c, int limit)
 	struct server *srv = c->srv;
 	struct transport *t = c->t;
 	struct querystring *qs = t->qs;
-	struct repo_dir *repo_dir = c->t->repo_dir;
+	struct repo_dir *repo_dir = t->repo_dir;
 	char *in_repo_path = NULL, *repo_path = NULL;
 	int chk_next = 0, chk_multi = 0, commit_found = 0, c_cnt = 0;
 	int obj_type;
@@ -317,6 +317,7 @@ got_get_repo_commits(struct request *c, int limit)
 		if (error)
 			goto err;
 		error = got_ref_resolve(&id, repo, ref);
+		got_ref_close(ref);
 		if (error)
 			goto err;
 	} else {
@@ -326,6 +327,7 @@ got_get_repo_commits(struct request *c, int limit)
 			if (error)
 				goto err;
 			error = got_object_get_type(&obj_type, repo, id);
+			got_ref_close(ref);
 			if (error)
 				goto err;
 			if (obj_type == GOT_OBJ_TYPE_TAG) {
@@ -398,34 +400,28 @@ got_get_repo_commits(struct request *c, int limit)
 		if (error)
 			goto err;
 
+		struct repo_commit *new_repo_commit = NULL;
+		error = got_init_repo_commit(&new_repo_commit);
+		if (error)
+			goto err;
+
+		TAILQ_INSERT_TAIL(&t->repo_commits, new_repo_commit, entry);
+
+		error = got_ref_list(&refs, repo, NULL, got_ref_cmp_by_name,
+		    NULL);
+		if (error)
+			goto err;
+
+		error = got_get_repo_commit(c, new_repo_commit, commit,
+		    &refs, id);
+		if (error)
+			goto err;
+
 		if (limit == 1 && chk_multi == 0 &&
-		    srv->max_commits_display != 1) {
-			error = got_get_repo_commit(c, repo_commit, commit,
-			    &refs, id);
-			if (error)
-				goto err;
-			TAILQ_INSERT_TAIL(&t->repo_commits, repo_commit,
-			    entry);
+		    srv->max_commits_display != 1)
 			commit_found = 1;
-		} else {
+		else {
 			chk_multi = 1;
-			struct repo_commit *new_repo_commit = NULL;
-			error = got_init_repo_commit(&new_repo_commit);
-			if (error)
-				goto err;
-
-			TAILQ_INSERT_TAIL(&t->repo_commits, new_repo_commit,
-			    entry);
-
-			error = got_ref_list(&refs, repo, NULL,
-			    got_ref_cmp_by_name, NULL);
-			if (error)
-				goto err;
-
-			error = got_get_repo_commit(c, new_repo_commit, commit,
-			    &refs, id);
-			if (error)
-				goto err;
 
 			if (qs->commit != NULL) {
 				if (strcmp(qs->commit,
@@ -437,7 +433,7 @@ got_get_repo_commits(struct request *c, int limit)
 
 			/*
 			 * check for one more commit before breaking,
-			 * so we know whether to navicate through briefs
+			 * so we know whether to navigate through briefs
 			 * commits and summary
 			 */
 			if (chk_next && (qs->action == BRIEFS ||
@@ -491,8 +487,7 @@ done:
 		}
 	}
 err:
-	if (ref)
-		got_ref_close(ref);
+	gotweb_free_repo_commit(repo_commit);
 	if (commit != NULL)
 		got_object_commit_close(commit);
 	if (graph)
