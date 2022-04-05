@@ -143,6 +143,7 @@ gotweb_process_request(struct request *c)
 	error = gotweb_parse_querystring(&qs, c->querystring);
 	if (error) {
 		gotweb_free_querystring(qs);
+		c->t->qs = NULL;
 		log_warnx("%s: %s", __func__, error->msg);
 		goto err;
 	}
