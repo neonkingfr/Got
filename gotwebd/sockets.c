@@ -674,7 +674,6 @@ sockets_accept_paused(int fd, short events, void *arg)
 void
 sockets_socket_accept(int fd, short event, void *arg)
 {
-	const struct got_error *error = NULL;
 	struct socket *sock = (struct socket *)arg;
 	struct sockaddr_storage ss;
 	struct timeval backoff;
@@ -716,14 +715,6 @@ sockets_socket_accept(int fd, short event, void *arg)
 	c = calloc(1, sizeof(struct request));
 	if (c == NULL) {
 		log_warn("%s", __func__);
-		close(s);
-		cgi_inflight--;
-		return;
-	}
-
-	error = gotweb_init_transport(&c->t);
-	if (error) {
-		log_warnx("%s: %s", __func__, error->msg);
 		close(s);
 		cgi_inflight--;
 		return;

@@ -191,20 +191,6 @@ struct address {
 };
 TAILQ_HEAD(addresslist, address);
 
-struct transport {
-	TAILQ_HEAD(headers, repo_header) repo_headers;
-	struct repo_dir		*repo_dir;
-	struct querystring	*qs;
-	char			*next_id;
-	char			*next_prev_id;
-	char			*prev_id;
-	char			*prev_prev_id;
-	char			*commit_id;
-	unsigned int		 repos_total;
-	unsigned int		 next_disp;
-	unsigned int		 prev_disp;
-};
-
 struct server {
 	TAILQ_ENTRY(server)	 entry;
 	struct addresslist	*al;
