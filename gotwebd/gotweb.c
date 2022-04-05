@@ -494,6 +494,10 @@ qa_found:
 				    __func__, errstr);
 				goto done;
 			}
+			if ((*qs)->index_page < 0) {
+				(*qs)->index_page = 0;
+				sprintf((*qs)->index_page_str, "%d", 0);
+			}
 			break;
 		case PATH:
 			(*qs)->path = strdup(value);
@@ -1691,7 +1695,7 @@ gotweb_render_diff(struct request *c)
 	if (fcgi_gen_response(c, "<div id='diff'>\n") == -1)
 		goto done;
 
-	error = got_output_diff(c);
+	error = got_output_repo_diff(c);
 	if (error)
 		goto done;
 
@@ -2093,6 +2097,35 @@ gotweb_render_tree(struct request *c)
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
 
+	if (fcgi_gen_response(c, "<div id='tree_content'>\n") == -1)
+		goto done;
+
+
+
+
+	if (fcgi_gen_response(c, "<div id='tree_header_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tree_header'>\n") == -1)
+		goto done;
+
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tree'>\n") == -1)
+		goto done;
+
+
+
+
+
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
 done:
 	return error;
 }

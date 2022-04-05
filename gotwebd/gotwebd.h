@@ -19,6 +19,7 @@
 
 #include <netinet/in.h>
 #include <net/if.h>
+#include <sys/queue.h>
 
 #include <limits.h>
 #include <stdio.h>
@@ -347,7 +348,7 @@ struct querystring {
 	char		*file;
 	char		*folder;
 	char		*headref;
-	unsigned int	 index_page;
+	int		 index_page;
 	char		*index_page_str;
 	char		*path;
 };
@@ -427,7 +428,8 @@ const struct got_error *got_get_repo_age(char **, struct request *, char *,
 const struct got_error *got_get_repo_commits(struct request *, int);
 const struct got_error *got_get_repo_tags(struct request *, int);
 const struct got_error *got_get_repo_heads(struct request *);
-const struct got_error *got_output_diff(struct request *);
+const struct got_error *got_output_repo_diff(struct request *);
+const struct got_error *got_output_repo_tree(struct request *);
 
 /* config.c */
 int config_setserver(struct gotwebd *, struct server *);
