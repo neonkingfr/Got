@@ -55,6 +55,9 @@ got_gotweb_flushtemp(FILE *f, int fd)
 	if (ftruncate(fd, 0) == -1)
 		return got_error_from_errno("ftruncate");
 
+	if (fsync(fd) == -1)
+		return got_error_from_errno("fsync");
+
 	if (f && fclose(f) == EOF)
 		return got_error_from_errno("fclose");
 
