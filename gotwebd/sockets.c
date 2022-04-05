@@ -40,7 +40,6 @@
 #include <limits.h>
 #include <netdb.h>
 #include <poll.h>
-#include <pthread.h>
 #include <pwd.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -65,7 +64,6 @@ void	 sockets_run(struct privsep *, struct privsep_proc *, void *);
 void	 sockets_launch(void);
 void	 sockets_accept_paused(int, short, void *);
 void	 sockets_dup_new_socket(struct socket *, struct socket *);
-void	*sockets_start_responder (void *);
 
 int	 sockets_dispatch_gotwebd(int, struct privsep_proc *, struct imsg *);
 int	 sockets_unix_socket_listen(struct privsep *, struct socket *);
@@ -327,8 +325,6 @@ sockets_launch(void)
 	TAILQ_FOREACH(sock, gotwebd_env->sockets, entry) {
 		log_debug("%s: configuring socket %d (%d)", __func__,
 		    sock->conf.id, sock->fd);
-
-		LIST_INIT(&sock->requests);
 
 		event_set(&sock->ev, sock->fd, EV_READ | EV_PERSIST,
 		    sockets_socket_accept, sock);
@@ -684,7 +680,7 @@ sockets_socket_accept(int fd, short event, void *arg)
 	struct timeval backoff;
 	struct request *c = NULL;
 	socklen_t len;
-	int s, ecode;
+	int s;
 
 	backoff.tv_sec = 1;
 	backoff.tv_usec = 0;
@@ -725,7 +721,6 @@ sockets_socket_accept(int fd, short event, void *arg)
 		return;
 	}
 
-	c->t = NULL;
 	error = gotweb_init_transport(&c->t);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
@@ -740,16 +735,7 @@ sockets_socket_accept(int fd, short event, void *arg)
 	c->buf_pos = 0;
 	c->buf_len = 0;
 	c->request_started = 0;
-	c->sock->client_status = CLIENT_START;
-	TAILQ_INIT(&c->response_head);
-
-	ecode = pthread_create(&c->thread, NULL, sockets_start_responder,
-	    (void *)c);
-
-	if (ecode) {
-		log_warnx("%s: pthread_create error %d", __func__, ecode);
-		goto err;
-	}
+	c->sock->client_status = CLIENT_CONNECT;
 
 	event_set(&c->ev, s, EV_READ, fcgi_request, c);
 	event_add(&c->ev, NULL);
@@ -759,47 +745,10 @@ sockets_socket_accept(int fd, short event, void *arg)
 
 	client_cnt++;
 
-	LIST_INSERT_HEAD(&sock->requests, c, entry);
 	return;
 err:
 	cgi_inflight--;
 	close(s);
 	if (c != NULL)
 		free(c);
-}
-
-void *
-sockets_start_responder(void *arg)
-{
-	const struct got_error *error = NULL;
-	struct request *c = (struct request *)arg;
-	struct fcgi_record_header *header;
-	struct fcgi_response *resp;
-	ssize_t n;
-
-	while (c->sock->client_status > CLIENT_END) {
-		if (TAILQ_EMPTY(&c->response_head) &&
-		    c->sock->client_status == CLIENT_FINISH)
-			break;
-		else if (TAILQ_EMPTY(&c->response_head))
-			continue;
-	    	resp = TAILQ_FIRST(&c->response_head);
-		header = (struct fcgi_record_header*) resp->data;
-		dump_fcgi_record("resp ", header);
-		n = write(c->fd, resp->data + resp->data_pos, resp->data_len);
-		/* we can't write, so exit */
-		if (n == -1) {
-			c->sock->client_status = CLIENT_DISCONNECT;
-			break;
-		}
-		resp->data_pos += n;
-		resp->data_len -= n;
-
-		if (resp->data_len == 0 &&
-		    c->sock->client_status > CLIENT_END) {
-			TAILQ_REMOVE(&c->response_head, resp, entry);
-			free(resp);
-		}
-	}
-	return (void *)error;
 }

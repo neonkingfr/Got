@@ -21,7 +21,6 @@
 #include <net/if.h>
 
 #include <limits.h>
-#include <pthread.h>
 #include <stdio.h>
 
 #ifdef DEBUG
@@ -144,10 +143,8 @@ struct fcgi_response {
 	size_t				data_pos;
 	size_t				data_len;
 };
-TAILQ_HEAD(fcgi_response_head, fcgi_response);
 
 struct request {
-	LIST_ENTRY(request)		 entry;
 	struct socket			*sock;
 	struct transport		*t;
 	struct event			 ev;
@@ -165,16 +162,11 @@ struct request {
 	char				 http_host[GOTWEBD_MAXTEXT];
 	char				 document_root[MAX_DOCUMENT_ROOT];
 
-	struct fcgi_response_head	 response_head;
 	struct env_head			 env;
 	int				 env_count;
 
-	pthread_t			 thread;
-
 	uint8_t				 request_started;
 };
-
-LIST_HEAD(requests_head, request);
 
 struct fcgi_begin_request_body {
 	uint16_t	role;
@@ -245,9 +237,7 @@ struct server {
 TAILQ_HEAD(serverlist, server);
 
 enum client_action {
-	CLIENT_END,
-	CLIENT_START,
-	CLIENT_FINISH,
+	CLIENT_CONNECT,
 	CLIENT_DISCONNECT,
 };
 
@@ -283,7 +273,6 @@ struct socket_conf {
 
 struct socket {
 	TAILQ_ENTRY(socket)	 entry;
-	struct requests_head	 requests;
 	struct socket_conf	 conf;
 
 	int		  fd;
@@ -408,7 +397,6 @@ int	 cmdline_symset(char *);
 
 /* fcgi.c */
 void	 fcgi_request(int, short, void *);
-void	 fcgi_add_response(struct request *, struct fcgi_response *);
 void	 fcgi_timeout(int, short, void *);
 void	 fcgi_cleanup_request(struct request *);
 void	 fcgi_create_end_record(struct request *);

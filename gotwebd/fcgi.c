@@ -38,6 +38,7 @@ size_t	 fcgi_parse_record(uint8_t *, size_t, struct request *);
 void	 fcgi_parse_begin_request(uint8_t *, uint16_t, struct request *,
 	    uint16_t);
 void	 fcgi_parse_params(uint8_t *, uint16_t, struct request *, uint16_t);
+void	 fcgi_send_response(struct request *, struct fcgi_response *);
 
 void	 dump_fcgi_record_header(const char *, struct fcgi_record_header *);
 void	 dump_fcgi_begin_request_body(const char *,
@@ -54,9 +55,6 @@ fcgi_request(int fd, short events, void *arg)
 	struct request *c = arg;
 	ssize_t n;
 	size_t parsed = 0;
-
-	if (c->sock->client_status > CLIENT_START)
-		return;
 
 	n = read(fd, c->buf + c->buf_pos + c->buf_len,
 	    FCGI_RECORD_SIZE - c->buf_pos-c->buf_len);
@@ -107,11 +105,6 @@ size_t
 fcgi_parse_record(uint8_t *buf, size_t n, struct request *c)
 {
 	struct fcgi_record_header *h;
-
-	if (c->sock->client_status == CLIENT_DISCONNECT) {
-		fcgi_cleanup_request(c);
-		return 0;
-	}
 
 	if (n < sizeof(struct fcgi_record_header))
 		 return 0;
@@ -335,13 +328,13 @@ fcgi_gen_response(struct request *c, char *data)
 	header->content_len = htons(n);
 	resp->data_pos = 0;
 	resp->data_len = n + sizeof(struct fcgi_record_header);
-	fcgi_add_response(c, resp);
+	fcgi_send_response(c, resp);
 
 	return 0;
 }
 
 void
-fcgi_add_response(struct request *c, struct fcgi_response *resp)
+fcgi_send_response(struct request *c, struct fcgi_response *resp)
 {
 	struct fcgi_record_header *header;
 	size_t padded_len;
@@ -358,7 +351,10 @@ fcgi_add_response(struct request *c, struct fcgi_response *resp)
 		resp->data_len = padded_len;
 	}
 
-	TAILQ_INSERT_TAIL(&c->response_head, resp, entry);
+	if ((write(c->fd, resp->data + resp->data_pos, resp->data_len)) == -1)
+		c->sock->client_status = CLIENT_DISCONNECT;
+
+	free(resp);
 }
 
 void
@@ -390,38 +386,21 @@ fcgi_create_end_record(struct request *c)
 	resp->data_pos = 0;
 	resp->data_len = sizeof(struct fcgi_end_request_body) +
 	    sizeof(struct fcgi_record_header);
-	fcgi_add_response(c, resp);
+	fcgi_send_response(c, resp);
 }
 
 void
 fcgi_cleanup_request(struct request *c)
 {
-	const struct got_error *error = NULL;
-	struct fcgi_response *resp;
-
-	c->sock->client_status = CLIENT_FINISH;
-
-	int errcode = pthread_join(c->thread, (void **)&error);
-	if (errcode) {
-		error = got_error_set_errno(errcode, "pthread_join");
-		log_warnx("%s", error->msg);
-	}
+	cgi_inflight--;
+	client_cnt--;
 
 	evtimer_del(&c->tmo);
 	if (event_initialized(&c->ev))
 		event_del(&c->ev);
 
 	close(c->fd);
-	while ((resp = TAILQ_FIRST(&c->response_head))) {
-		TAILQ_REMOVE(&c->response_head, resp, entry);
-		free(resp);
-	}
-
 	gotweb_free_transport(c->t);
-
-	LIST_REMOVE(c, entry);
-	cgi_inflight--;
-	client_cnt--;
 	free(c);
 }
 

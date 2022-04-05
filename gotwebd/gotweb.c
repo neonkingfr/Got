@@ -947,7 +947,6 @@ render:
 		if (d_disp == srv->max_repos_display)
 			break;
 	}
-log_warn("tot: %d", c->t->repos_total);
 	if (srv->max_repos_display == 0)
 		goto div;
 	if (srv->max_repos > 0 && srv->max_repos < srv->max_repos_display)
