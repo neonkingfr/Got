@@ -754,6 +754,7 @@ sockets_start_responder(void *arg)
 	struct fcgi_response *resp;
 	ssize_t n;
 
+	log_debug("%s: started thread", __func__);
 	while (c->sock->request_loop > LOOP_END) {
 		if (TAILQ_EMPTY(&c->response_head))
 			continue;
@@ -783,5 +784,6 @@ done:
 	c->sock->request_loop = LOOP_END;
 	fcgi_cleanup_request(c);
 err:
+	log_debug("%s: closed thread", __func__);
 	return (void *)error;
 }

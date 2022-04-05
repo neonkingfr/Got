@@ -92,13 +92,9 @@ got_get_repo_age(char **repo_age, struct server *srv, char *dir,
 	if (srv->show_repo_age == 0)
 		return NULL;
 
-	if (srv->gw_trans->repo)
-		repo = srv->gw_trans->repo;
-	else {
-		error = got_repo_open(&repo, dir, NULL);
-		if (error)
-			return error;
-	}
+	error = got_repo_open(&repo, dir, NULL);
+	if (error)
+		return error;
 
 	error = got_ref_list(&refs, repo, "refs/heads",
 	    got_ref_cmp_by_name, NULL);
@@ -140,8 +136,7 @@ got_get_repo_age(char **repo_age, struct server *srv, char *dir,
 	}
 done:
 	got_ref_list_free(&refs);
-	if (srv->gw_trans->repo == NULL)
-		got_repo_close(repo);
+	got_repo_close(repo);
 	return error;
 }
 

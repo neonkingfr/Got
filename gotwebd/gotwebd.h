@@ -195,16 +195,23 @@ struct address {
 };
 TAILQ_HEAD(addresslist, address);
 
-struct gw_trans {
+struct transport {
 	/* TAILQ_HEAD(headers, gw_header)	 gw_headers; */
-	struct got_repository	*repo;
+	struct querystring	*qs;
+	char			*next_id;
+	char			*next_prev_id;
+	char			*prev_id;
+	char			*prev_prev_id;
+	char			*commit_id;
 	unsigned int		 repos_total;
+	unsigned int		 next_disp;
+	unsigned int		 prev_disp;
 };
 
 struct server {
 	TAILQ_ENTRY(server)	 entry;
 	struct addresslist	*al;
-	struct gw_trans		*gw_trans;
+	struct transport	*t;
 
 	char		 name[GOTWEBD_MAXTEXT];
 
@@ -337,35 +344,34 @@ struct action_keys {
 };
 
 enum querystring_elements {
-	GW_ACTION,
-	GW_COMMIT,
-	GW_FILE,
-	GW_FOLDER,
-	GW_HEADREF,
-	GW_PAGE,
-	GW_PATH,
-	GW_PREV,
-	GW_PREV_PREV,
-	GW_QSELEM__MAX,
+	ACTION,
+	COMMIT,
+	RFILE,
+	FOLDER,
+	HEADREF,
+	PAGE,
+	PATH,
+	PREV,
+	PREV_PREV,
+	QSELEM__MAX,
 };
 
-enum gw_query_actions {
-	GW_BLAME,
-	GW_BLOB,
-	GW_BRIEFS,
-	GW_COMMITS,
-	GW_DIFF,
-	GW_ERR,
-	GW_INDEX,
-	GW_SUMMARY,
-	GW_TAG,
-	GW_TAGS,
-	GW_TREE,
-	GW_ACTIONS__MAX,
+enum query_actions {
+	INDEX,
+	BLAME,
+	BLOB,
+	BRIEFS,
+	COMMITS,
+	DIFF,
+	ERR,
+	SUMMARY,
+	TAG,
+	TAGS,
+	TREE,
+	ACTIONS__MAX,
 };
 
-struct gw_dir {
-	TAILQ_ENTRY(gw_dir)	 entry;
+struct repo_dir {
 	char			*name;
 	char			*owner;
 	char			*description;

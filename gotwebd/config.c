@@ -132,9 +132,6 @@ config_getserver(struct gotwebd *env, struct imsg *imsg)
 	    srv->name, srv->fcgi_socket ? "yes" : "no", srv->unix_socket ?
 	    "yes" : "no");
 
-	srv->gw_trans = calloc(1, sizeof(*srv->gw_trans));
-	if (srv->gw_trans == NULL)
-		fatalx("%s: calloc", __func__);
 	TAILQ_INSERT_TAIL(env->servers, srv, entry);
 
 	 return 0;

@@ -348,7 +348,6 @@ serveropts1	: /* server name, default settings */
 			new_srv->show_repo_cloneurl = $2;
 		}
 		| MAX_REPOS_DISPLAY NUMBER {
-			if ($2 > 0)
 				new_srv->max_repos_display = $2;
 		}
 		| MAX_COMMITS_DISPLAY NUMBER {

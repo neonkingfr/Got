@@ -294,6 +294,12 @@ fcgi_gen_response(struct request *c, char *data)
 	ssize_t n = 0;
 	int i, j;
 
+	if (data == NULL)
+		return;
+
+	if (strlen(data) == 0)
+		return;
+
 	if ((resp = calloc(1, sizeof(struct fcgi_response))) == NULL) {
 		log_warn("cannot malloc fcgi_response");
 		return;
