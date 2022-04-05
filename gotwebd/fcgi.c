@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "got_error.h"
@@ -338,7 +339,12 @@ void
 fcgi_send_response(struct request *c, struct fcgi_response *resp)
 {
 	struct fcgi_record_header *header;
+	struct timespec ts;
 	size_t padded_len;
+	int err = 0, th = 2000;
+
+	ts.tv_sec = 0;
+	ts.tv_nsec = 50;
 
 	header = (struct fcgi_record_header*)resp->data;
 
@@ -354,8 +360,19 @@ fcgi_send_response(struct request *c, struct fcgi_response *resp)
 
 	dump_fcgi_record("resp ", header);
 
-	if ((write(c->fd, resp->data + resp->data_pos, resp->data_len)) == -1)
-		c->sock->client_status = CLIENT_DISCONNECT;
+	/*
+	 * XXX: add some simple write heuristics here
+	 * On slower VMs, spotty connections, etc., we don't want to go right to
+	 * disconnect. Let's at least try to write the data a few times before
+	 * giving up.
+	 */
+	while ((write(c->fd, resp->data + resp->data_pos,
+	    resp->data_len)) == -1) {
+		nanosleep(&ts, NULL);
+		err++;
+		if (err == th)
+			c->sock->client_status = CLIENT_DISCONNECT;
+	}
 
 	free(resp);
 }
