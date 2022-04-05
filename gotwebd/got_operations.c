@@ -416,6 +416,12 @@ got_get_repo_commits(struct request *c, int limit)
 		goto err;
 
 	for (;;) {
+		/*
+		 * XXX: leak starts here
+		 * There is a leak somewhere in the graph code
+		 * comment out lines 435-454, 459-471, 478-490 to test,
+		 * unless i'm missing something here
+		 */
 		error = got_commit_graph_iter_next(&id, graph, repo, NULL,
 		    NULL);
 		if (error) {
@@ -446,6 +452,9 @@ got_get_repo_commits(struct request *c, int limit)
 		    &refs, id);
 		if (error)
 			goto err;
+
+		free(id);
+		id = NULL;
 
 		if (limit == 1 && chk_multi == 0 &&
 		    srv->max_commits_display != 1)
@@ -487,8 +496,6 @@ got_get_repo_commits(struct request *c, int limit)
 		}
 		if (commit != NULL)
 			got_object_commit_close(commit);
-		free(id);
-		id = NULL;
 
 	}
 done:
@@ -646,11 +653,14 @@ got_output_diff(struct request *c)
 		if (linelen > 0)
 			wrlen = wrlen + linelen;
 	}
-	if (linelen == -1 && ferror(f))
+	if (linelen == -1 && ferror(f)) {
 		error = got_error_from_errno("getline");
+		got_gotweb_flushtemp(f, fd);
+		goto done;
+	}
+	error = got_gotweb_flushtemp(f, fd);
 done:
 	got_ref_list_free(&refs);
-	error = got_gotweb_flushtemp(f, fd);
 	free(line);
 	free(eline);
 	free(label1);
