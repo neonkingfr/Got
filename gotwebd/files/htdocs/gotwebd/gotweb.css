@@ -15,8 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* XXX: this needs a serious audit at the end of gotwebd */
-
 /* general sections */
 
 a {
@@ -72,12 +70,6 @@ body {
 	float: left;
 	width: 100%;
 	border-top: 1px dotted #444444;
-}
-#solid_line {
-	clear: left;
-	float: left;
-	width: 100%;
-	border-top: 1px solid #444444;
 }
 #header {
 	overflow: auto;
@@ -232,16 +224,6 @@ body {
 	overflow: auto;
 	white-space: pre-wrap;
 }
-#tmpl_err {
-	clear: left;
-	float: left;
-	padding-left: 20px;
-	padding-top: 20px;
-	padding-bottom: 20px;
-	white-space: pre-wrap;
-}
-
-/* headers */
 
 #header_commit_title {
 	clear: left;
@@ -343,8 +325,6 @@ body {
 	padding-bottom: 2px;
 }
 
-/* err action */
-
 #err_content {
 	clear: left;
 	float: left;
@@ -353,8 +333,6 @@ body {
 	padding-top: 20px;
 	padding-bottom: 20px;
 }
-
-/* briefs.tmpl */
 
 #briefs_title_wrapper {
 	clear: left;
@@ -398,7 +376,6 @@ body {
 	width: 65%;
 }
 
-/* tags */
 #tags_title_wrapper {
 	clear: left;
 	float: left;
@@ -424,14 +401,6 @@ body {
 	width: 7.5em;
 	overflow: auto;
 }
-#tags_tag {
-	float: left;
-	padding-top: 5px;
-	padding-bottom: 5px;
-	width: 8.5em;
-	font-style: italic;
-	overflow: auto;
-}
 #tags_log {
 	float: left;
 	padding-left: 10px;
@@ -441,23 +410,6 @@ body {
 	width: 65%;
 }
 
-#tag_title_wrapper {
-	clear: left;
-	float: left;
-	width: 100%;
-	background-color: LightSlateGray;
-	color: #ffffff;
-}
-#tag_title {
-	padding-left: 10px;
-	padding-top: 5px;
-	padding-bottom: 5px;
-}
-#tag_content {
-	clear: left;
-	float: left;
-	width: 100%;
-}
 #tag_header_wrapper {
 	clear: left;
 	float: left;
@@ -471,49 +423,12 @@ body {
 	padding-bottom: 2px;
 	width: 80%;
 }
-#tag_wrapper {
-	clear: left;
-	float: left;
-	width: 100%;
-}
-
-#tag_age {
-	padding-left: 10px;
-	padding-top: 5px;
-	padding-bottom: 5px;
-	float: left;
-	width: 7.5em;
-	overflow: auto;
-}
 #tag {
 	float: left;
 	width: 8.5em;
 	font-style: italic;
 	padding-top: 5px;
 	padding-bottom: 5px;
-}
-#tag_name {
-	float: left;
-	padding-left: 10px;
-	padding-right: 10px;
-	padding-top: 5px;
-	padding-bottom: 5px;
-}
-#tag_info_date_title {
-	clear: left;
-	float: left;
-	width: 7.5em;
-}
-#tag_info_date {
-	float: left;
-}
-#tag_info_tagger_title {
-	clear: left;
-	float: left;
-	width: 7.5em;
-}
-#tag_info_tagger {
-	float: left;
 }
 #tag_commit {
 	clear: left;
@@ -522,18 +437,6 @@ body {
 	padding-bottom: 20px;
 	white-space: pre-wrap;
 }
-
-/* tags.tmpl */
-#tags_info {
-	clear: left;
-	float: left;
-	padding-left: 10px;
-	padding-top: 5px;
-	padding-bottom: 5px;
-}
-
-
-/* index.tmpl */
 
 #index_header {
 	clear: left;
@@ -624,8 +527,6 @@ body {
 	text-decoration: none;
 }
 
-/* commit.tmpl */
-
 #commits_title_wrapper {
 	clear: left;
 	float: left;
@@ -665,8 +566,6 @@ body {
 	clear: left;
 	float: left;
 }
-
-/* blame.tmpl */
 
 #blame_title_wrapper {
 	clear: left;
@@ -737,8 +636,6 @@ body {
 	overflow: visible;
 }
 
-/* tree.tmpl */
-
 #tree_title_wrapper {
 	clear: left;
 	float: left;
@@ -800,8 +697,6 @@ body {
 	width: 8em;
 }
 
-/* diff.tmpl */
-
 #diff_title_wrapper {
 	clear: left;
 	float: left;
@@ -844,8 +739,6 @@ body {
 	float: left;
 }
 
-/* summary.tmpl */
-
 #summary_wrapper {
 	clear: left;
 	float: left;
@@ -853,7 +746,6 @@ body {
 	background-color: Khaki;
 }
 
-/* branches */
 #branches_title_wrapper {
 	clear: left;
 	float: left;
@@ -899,4 +791,3 @@ body {
 	padding-top: 5px;
 	padding-bottom: 5px;
 }
-
