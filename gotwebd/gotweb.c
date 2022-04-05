@@ -313,7 +313,6 @@ gotweb_get_server(uint8_t *server_name, uint8_t *document_root,
 	TAILQ_FOREACH(srv, gotwebd_env->servers, entry)
 		if (srv != NULL)
 			break;
-log_info("%s:%s:%s", server_name, document_root, subdomain);
 done:
 	return srv;
 };
