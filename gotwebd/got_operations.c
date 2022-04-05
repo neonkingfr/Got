@@ -306,7 +306,7 @@ got_get_repo_commits(struct request *c, int limit)
 
 	error = got_repo_open(&repo, repo_path, NULL);
 	if (error)
-		return error;
+		goto done;
 
 	c->t->repo = repo;
 

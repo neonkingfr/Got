@@ -650,7 +650,7 @@ gotweb_render_header(struct request *c)
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
-	if (asprintf(&gotimg, "<img src='%s%s' alt='logo' id='logo'/></a>\n",
+	if (asprintf(&gotimg, "<img src='%s%s' alt='logo' id='logo'/></a>",
 	    droot, srv->logo) == -1) {
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
@@ -698,7 +698,7 @@ gotweb_render_header(struct request *c)
 	if (fcgi_gen_response(c, "</head>\n<body>\n<div id='gw_body'>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c,
-	    "<div id='header'>\n<div id='got_link'>\n") == -1)
+	    "<div id='header'>\n<div id='got_link'>") == -1)
 		goto done;
 	if (fcgi_gen_response(c, gotlink) == -1)
 		goto done;
@@ -781,7 +781,7 @@ gotweb_render_footer(struct request *c)
 
 	if (fcgi_gen_response(c, "<div id='site_owner_wrapper'>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "<div id='site_owner'>\n") == -1)
+	if (fcgi_gen_response(c, "<div id='site_owner'>") == -1)
 		goto done;
 	if (srv->show_site_owner) {
 		error = gotweb_escape_html(&siteowner, srv->site_owner);
@@ -792,7 +792,7 @@ gotweb_render_footer(struct request *c)
 	} else
 		if (fcgi_gen_response(c, "&nbsp;") == -1)
 			goto done;
-	fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>");
+	fcgi_gen_response(c, "</div>\n</div>\n</div>\n</body>\n</html>");
 done:
 	free(siteowner);
 
@@ -849,7 +849,7 @@ gotweb_render_navs(struct request *c)
 			goto  done;
 		if (fcgi_gen_response(c, phref) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "'>Previous</a>\n") == -1)
+		if (fcgi_gen_response(c, "'>Previous</a>") == -1)
 			goto done;
 	}
 	if (fcgi_gen_response(c, "</div>\n") == -1)
@@ -894,12 +894,9 @@ gotweb_render_navs(struct request *c)
 			goto done;
 		if (fcgi_gen_response(c, nhref) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "'>Next</a>\n") == -1)
+		if (fcgi_gen_response(c, "'>Next</a>") == -1)
 			goto done;
 	}
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-
 	fcgi_gen_response(c, "</div>\n");
 done:
 	free(phref);
@@ -1143,9 +1140,10 @@ render:
 		if (fcgi_gen_response(c, "</a>") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "</div>\n") == -1)
+		if (fcgi_gen_response(c, "</div>") == -1)
 			goto done;
-		if (fcgi_gen_response(c, "<div id='dotted_line'></div>") == -1)
+		if (fcgi_gen_response(c,
+		    "<div id='dotted_line'></div>\n") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "</div>\n") == -1)
 			goto done;
@@ -1330,7 +1328,8 @@ gotweb_render_briefs(struct request *c)
 			goto done;
 		if (fcgi_gen_response(c, "</div>\n") == -1)
 			goto done;
-		if (fcgi_gen_response(c, "<div id='dotted_line'></div>") == -1)
+		if (fcgi_gen_response(c,
+		    "<div id='dotted_line'></div>\n") == -1)
 			goto done;
 
 		free(age);
@@ -1344,11 +1343,9 @@ gotweb_render_briefs(struct request *c)
 		if (error)
 			goto done;
 	}
-
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
 	fcgi_gen_response(c, "</div>\n");
 done:
+	free(age);
 	return error;
 }
 
