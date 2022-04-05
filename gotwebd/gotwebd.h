@@ -144,6 +144,15 @@ struct repo_dir {
 	char			*path;
 };
 
+struct repo_tag {
+	TAILQ_ENTRY(repo_tag)	 entry;
+	char			*commit_id;
+	char			*tag_name;
+	char			*tag_commit;
+	char			*tagger;
+	time_t			 tagger_time;
+};
+
 struct repo_commit {
 	TAILQ_ENTRY(repo_commit)	 entry;
 	char			*path;
@@ -159,7 +168,8 @@ struct repo_commit {
 
 struct got_repository;
 struct transport {
-	TAILQ_HEAD(repo_head, repo_commit) repo_commits;
+	TAILQ_HEAD(repo_commits_head, repo_commit)	 repo_commits;
+	TAILQ_HEAD(repo_tags_head, repo_tag)		 repo_tags;
 	struct got_repository	*repo;
 	struct repo_dir		*repo_dir;
 	struct querystring	*qs;
@@ -169,6 +179,7 @@ struct transport {
 	unsigned int		 repos_total;
 	unsigned int		 next_disp;
 	unsigned int		 prev_disp;
+	unsigned int		 tag_count;
 };
 
 struct request {
@@ -389,6 +400,7 @@ const struct got_error *gotweb_get_time_str(char **, time_t, int);
 const struct got_error *gotweb_init_transport(struct transport **);
 const struct got_error *gotweb_escape_html(char **, const char *);
 void gotweb_free_repo_commit(struct repo_commit *);
+void gotweb_free_repo_tag(struct repo_tag *);
 void gotweb_process_request(struct request *);
 void gotweb_free_transport(struct transport *);
 
@@ -410,6 +422,7 @@ const struct got_error *got_get_repo_owner(char **, struct request *, char *);
 const struct got_error *got_get_repo_age(char **, struct request *, char *,
     const char *, int);
 const struct got_error *got_get_repo_commits(struct request *, int);
+const struct got_error *got_get_repo_tags(struct request *, int);
 const struct got_error *got_output_diff(struct request *);
 
 /* config.c */

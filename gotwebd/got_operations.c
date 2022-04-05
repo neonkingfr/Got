@@ -40,6 +40,7 @@
 #include "gotwebd.h"
 
 static const struct got_error *got_init_repo_commit(struct repo_commit **);
+static const struct got_error *got_init_repo_tag(struct repo_tag **);
 static const struct got_error *got_get_repo_commit(struct request *,
     struct repo_commit *, struct got_commit_object *, struct got_reflist_head *,
     struct got_object_id *);
@@ -340,8 +341,7 @@ got_get_repo_commits(struct request *c, int limit)
 		return error;
 
 	if (qs->commit == NULL || qs->action == COMMITS ||
-	    qs->action == BRIEFS || qs->action == SUMMARY ||
-	    qs->action == TAGS) {
+	    qs->action == BRIEFS || qs->action == SUMMARY) {
 		error = got_ref_open(&ref, repo, t->headref, 0);
 		if (error)
 			goto err;
@@ -475,6 +475,14 @@ got_get_repo_commits(struct request *c, int limit)
 					error = got_error_from_errno("strdup");
 					goto err;
 				}
+				if (commit) {
+					got_object_commit_close(commit);
+					commit = NULL;
+				}
+				if (t->next_id == NULL) {
+					error = got_error_from_errno("strdup");
+					goto err;
+				}
 				TAILQ_REMOVE(&t->repo_commits, new_repo_commit,
 				    entry);
 				gotweb_free_repo_commit(new_repo_commit);
@@ -500,7 +508,7 @@ done:
 	if (t->prev_id == NULL && qs->commit != NULL &&
 	    (qs->action == BRIEFS || qs->action == COMMITS)) {
 		commit_found = 0;
-		TAILQ_FOREACH_REVERSE(r_s, &t->repo_commits, repo_head,
+		TAILQ_FOREACH_REVERSE(r_s, &t->repo_commits, repo_commits_head,
 		    entry) {
 			if (commit_found == 0 &&
 			    strcmp(qs->commit, r_s->commit_id) != 0) {
@@ -523,6 +531,257 @@ err:
 		got_object_commit_close(commit);
 	if (graph)
 		got_commit_graph_close(graph);
+	got_ref_list_free(&refs);
+	free(repo_path);
+	free(id);
+	return error;
+}
+
+const struct got_error *
+got_get_repo_tags(struct request *c, int limit)
+{
+	const struct got_error *error = NULL;
+	struct got_object_id *id = NULL;
+	struct got_commit_object *commit = NULL;
+	struct got_reflist_head refs;
+	struct got_reference *ref;
+	struct got_reflist_entry *re;
+	struct server *srv = c->srv;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
+	struct querystring *qs = t->qs;
+	struct repo_dir *repo_dir = t->repo_dir;
+	struct got_tag_object *tag = NULL;
+	struct repo_tag *r_t = NULL;
+	char *in_repo_path = NULL, *repo_path = NULL, *id_str = NULL;
+	int chk_next = 0, chk_multi = 1, commit_found = 0, c_cnt = 0;
+	int obj_type;
+
+	TAILQ_INIT(&refs);
+
+	if (asprintf(&repo_path, "%s/%s", srv->repos_path,
+	    repo_dir->name) == -1)
+		return got_error_from_errno("asprintf");
+
+	if (error)
+		return error;
+
+	if (qs->commit == NULL) {
+		error = got_ref_open(&ref, repo, t->headref, 0);
+		if (error)
+			goto err;
+		error = got_ref_resolve(&id, repo, ref);
+		got_ref_close(ref);
+		if (error)
+			goto err;
+	} else {
+		error = got_ref_open(&ref, repo, qs->commit, 0);
+		if (error == NULL) {
+			error = got_ref_resolve(&id, repo, ref);
+			if (error)
+				goto err;
+			error = got_object_get_type(&obj_type, repo, id);
+			got_ref_close(ref);
+			if (error)
+				goto err;
+			if (obj_type == GOT_OBJ_TYPE_TAG) {
+				struct got_tag_object *tag;
+				error = got_object_open_as_tag(&tag, repo, id);
+				if (error)
+					goto err;
+				if (got_object_tag_get_object_type(tag) !=
+				    GOT_OBJ_TYPE_COMMIT) {
+					got_object_tag_close(tag);
+					error = got_error(GOT_ERR_OBJ_TYPE);
+					goto err;
+				}
+				free(id);
+				id = got_object_id_dup(
+				    got_object_tag_get_object_id(tag));
+				if (id == NULL)
+					error = got_error_from_errno(
+					    "got_object_id_dup");
+				got_object_tag_close(tag);
+				if (error)
+					goto err;
+			} else if (obj_type != GOT_OBJ_TYPE_COMMIT) {
+				error = got_error(GOT_ERR_OBJ_TYPE);
+				goto err;
+			}
+		}
+		error = got_repo_match_object_id_prefix(&id, qs->commit,
+		    GOT_OBJ_TYPE_COMMIT, repo);
+		if (error)
+			goto err;
+	}
+
+	error = got_repo_map_path(&in_repo_path, repo, repo_path);
+	if (error)
+		goto err;
+
+	error = got_ref_list(&refs, repo, "refs/tags", got_ref_cmp_tags, repo);
+	if (error)
+		goto err;
+
+	if (limit == 1)
+		chk_multi = 0;
+
+	TAILQ_FOREACH(re, &refs, entry) {
+		struct repo_tag *new_repo_tag = NULL;
+		error = got_init_repo_tag(&new_repo_tag);
+		if (error)
+			goto err;
+
+		TAILQ_INSERT_TAIL(&t->repo_tags, new_repo_tag, entry);
+
+		new_repo_tag->tag_name = strdup(got_ref_get_name(re->ref));
+		if (new_repo_tag->tag_name == NULL) {
+			error = got_error_from_errno("strdup");
+			goto err;
+		}
+		if (strncmp(new_repo_tag->tag_name, "refs/tags/", 10) != 0)
+			continue;
+		new_repo_tag->tag_name += 10;
+
+		error = got_ref_resolve(&id, repo, re->ref);
+		if (error)
+			goto done;
+
+		error = got_object_open_as_tag(&tag, repo, id);
+		if (error) {
+			if (error->code != GOT_ERR_OBJ_TYPE) {
+				free(id);
+				id = NULL;
+				goto done;
+			}
+			/* "lightweight" tag */
+			error = got_object_open_as_commit(&commit, repo, id);
+			if (error) {
+				free(id);
+				id = NULL;
+				goto done;
+			}
+			new_repo_tag->tagger =
+			    strdup(got_object_commit_get_committer(commit));
+			if (new_repo_tag->tagger == NULL) {
+				error = got_error_from_errno("strdup");
+				goto err;
+			}
+			new_repo_tag->tagger_time =
+			    got_object_commit_get_committer_time(commit);
+			error = got_object_id_str(&id_str, id);
+			if (error)
+				goto err;
+			free(id);
+			id = NULL;
+		} else {
+			free(id);
+			id = NULL;
+			new_repo_tag->tagger =
+			    strdup(got_object_tag_get_tagger(tag));
+			if (new_repo_tag->tagger == NULL) {
+				error = got_error_from_errno("strdup");
+				goto err;
+			}
+			new_repo_tag->tagger_time =
+			    got_object_tag_get_tagger_time(tag);
+			error = got_object_id_str(&id_str,
+			    got_object_tag_get_object_id(tag));
+			if (error)
+				goto err;
+		}
+
+		new_repo_tag->commit_id = strdup(id_str);
+		if (new_repo_tag->commit_id == NULL)
+			goto err;
+
+		if (commit_found == 0 && qs->commit != NULL &&
+		    strncmp(id_str, qs->commit, strlen(id_str)) != 0)
+			continue;
+		else
+			commit_found = 1;
+
+		t->tag_count++;
+
+		/*
+		 * check for one more commit before breaking,
+		 * so we know whether to navigate through briefs
+		 * commits and summary
+		 */
+		if (chk_next) {
+			t->next_id = strdup(new_repo_tag->commit_id);
+			if (t->next_id == NULL) {
+				error = got_error_from_errno("strdup");
+				goto err;
+			}
+			if (commit) {
+				got_object_commit_close(commit);
+				commit = NULL;
+			}
+			if (t->next_id == NULL) {
+				error = got_error_from_errno("strdup");
+				goto err;
+			}
+			TAILQ_REMOVE(&t->repo_tags, new_repo_tag, entry);
+			gotweb_free_repo_tag(new_repo_tag);
+			goto done;
+		}
+
+		if (commit) {
+			error = got_object_commit_get_logmsg(&new_repo_tag->
+			    tag_commit, commit);
+			if (error)
+				goto done;
+			got_object_commit_close(commit);
+			commit = NULL;
+		} else {
+			new_repo_tag->tag_commit =
+			    strdup(got_object_tag_get_message(tag));
+			if (new_repo_tag->tag_commit == NULL) {
+				error = got_error_from_errno("strdup");
+				goto done;
+			}
+		}
+
+		while (*new_repo_tag->tag_commit == '\n')
+			new_repo_tag->tag_commit++;
+
+		if (limit && --limit == 0) {
+			if (chk_multi == 0)
+				break;
+			chk_next = 1;
+		}
+		free(id);
+		id = NULL;
+	}
+
+done:
+	/*
+	 * we have tailq populated, so find previous commit id
+	 * for navigation through briefs and commits
+	 */
+	if (t->prev_id == NULL && qs->commit != NULL) {
+		commit_found = 0;
+		TAILQ_FOREACH_REVERSE(r_t, &t->repo_tags, repo_tags_head,
+		    entry) {
+			if (commit_found == 0 &&
+			    strcmp(qs->commit, r_t->commit_id) != 0) {
+				continue;
+			} else
+				commit_found = 1;
+			if (c_cnt == srv->max_commits_display ||
+			    r_t == TAILQ_FIRST(&t->repo_tags)) {
+				t->prev_id = strdup(r_t->commit_id);
+				if (t->prev_id == NULL)
+					error = got_error_from_errno("strdup");
+				break;
+			}
+			c_cnt++;
+		}
+	}
+err:
+	if (commit)
+		got_object_commit_close(commit);
 	got_ref_list_free(&refs);
 	free(repo_path);
 	free(id);
@@ -681,6 +940,23 @@ got_init_repo_commit(struct repo_commit **rc)
 	(*rc)->parent_id = NULL;
 	(*rc)->tree_id = NULL;
 	(*rc)->commit_msg = NULL;
+
+	return error;
+}
+
+static const struct got_error *
+got_init_repo_tag(struct repo_tag **rt)
+{
+	const struct got_error *error = NULL;
+
+	*rt = calloc(1, sizeof(**rt));
+	if (*rt == NULL)
+		return got_error_from_errno2("%s: calloc", __func__);
+
+	(*rt)->commit_id = NULL;
+	(*rt)->tag_name = NULL;
+	(*rt)->tag_commit = NULL;
+	(*rt)->tagger = NULL;
 
 	return error;
 }

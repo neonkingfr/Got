@@ -51,11 +51,6 @@ enum gotweb_ref_tm {
 	TM_LONG,
 };
 
-enum gotweb_tags_type {
-	TAGBRIEF,
-	TAGFULL,
-};
-
 static const struct querystring_keys querystring_keys[] = {
 	{ "action",		ACTION },
 	{ "commit",		COMMIT },
@@ -340,6 +335,7 @@ gotweb_init_transport(struct transport **t)
 		return got_error_from_errno2("%s: calloc", __func__);
 
 	TAILQ_INIT(&(*t)->repo_commits);
+	TAILQ_INIT(&(*t)->repo_tags);
 
 	(*t)->repo = NULL;
 	(*t)->repo_dir = NULL;
@@ -516,6 +512,16 @@ done:
 }
 
 void
+gotweb_free_repo_tag(struct repo_tag *rt)
+{
+	if (rt != NULL) {
+		free(rt->commit_id);
+		free(rt->tagger);
+	}
+	free(rt);
+}
+
+void
 gotweb_free_repo_commit(struct repo_commit *rc)
 {
 	if (rc != NULL) {
@@ -563,10 +569,15 @@ void
 gotweb_free_transport(struct transport *t)
 {
 	struct repo_commit *rc = NULL, *trc = NULL;
+	struct repo_tag *rt = NULL, *trt = NULL;
 
 	TAILQ_FOREACH_SAFE(rc, &t->repo_commits, entry, trc) {
 		TAILQ_REMOVE(&t->repo_commits, rc, entry);
 		gotweb_free_repo_commit(rc);
+	}
+	TAILQ_FOREACH_SAFE(rt, &t->repo_tags, entry, trt) {
+		TAILQ_REMOVE(&t->repo_tags, rt, entry);
+		gotweb_free_repo_tag(rt);
 	}
 	gotweb_free_repo_dir(t->repo_dir);
 	gotweb_free_querystring(t->qs);
@@ -842,6 +853,20 @@ gotweb_render_navs(struct request *c)
 			disp = 1;
 		}
 		break;
+	case TAGS:
+		if (t->prev_id && qs->commit != NULL &&
+		    strcmp(qs->commit, t->prev_id) != 0) {
+			if (asprintf(&phref, "index_page=%d&&path=%s"
+			    "&action=tags&commit=%s",
+			    qs->index_page, qs->path,
+			    t->prev_id) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			disp = 1;
+		}
+		break;
 	default:
 		disp = 0;
 		break;
@@ -900,6 +925,18 @@ gotweb_render_navs(struct request *c)
 			disp = 1;
 		}
 		break;
+	case TAGS:
+		if (t->next_id) {
+			if (asprintf(&nhref, "index_page=%d&path=%s"
+			    "&action=tags&commit=%s",
+			    qs->index_page, qs->path, t->next_id) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			disp = 1;
+		}
+		break;
 	default:
 		disp = 0;
 		break;
@@ -914,6 +951,10 @@ gotweb_render_navs(struct request *c)
 	}
 	fcgi_gen_response(c, "</div>\n");
 done:
+	free(t->next_id);
+	t->next_id = NULL;
+	free(t->prev_id);
+	t->prev_id = NULL;
 	free(phref);
 	free(nhref);
 	return error;
@@ -1412,9 +1453,9 @@ gotweb_render_commits(struct request *c)
 			goto done;
 
 		if (fcgi_gen_response(c,
-		    "<div id='diff_header_wrapper'>\n") == -1)
+		    "<div id='commits_header_wrapper'>\n") == -1)
 			goto done;
-		if (fcgi_gen_response(c, "<div id='diff_header'>\n") == -1)
+		if (fcgi_gen_response(c, "<div id='commits_header'>\n") == -1)
 			goto done;
 
 
@@ -1529,6 +1570,8 @@ gotweb_render_commits(struct request *c)
 		if (error)
 			goto done;
 	}
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
 	fcgi_gen_response(c, "</div>\n");
 done:
 	free(age);
@@ -1731,7 +1774,11 @@ content:
 		goto done;
 	}
 
-
+	error = gotweb_render_tags(c);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		goto done;
+	}
 
 done:
 	return error;
@@ -1741,6 +1788,100 @@ static const struct got_error *
 gotweb_render_tag(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct repo_tag *rt = NULL;
+	struct server *srv = c->srv;
+	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
+	struct repo_dir *repo_dir = t->repo_dir;
+	char *age = NULL, *author = NULL;
+	int commit_found = 0;
+
+	error = got_get_repo_tags(c, 1);
+	if (error)
+		goto done;
+
+	rt = TAILQ_FIRST(&t->repo_tags);
+
+	error = gotweb_get_time_str(&age, rt->tagger_time, TM_LONG);
+	if (error)
+		goto done;
+	error = gotweb_escape_html(&author, rt->tagger);
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tags_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tags_title'>Tag</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tags_content'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tag_header_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tag_header'>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_commit_title'>Commit:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_commit'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rt->commit_id) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_author_title'>Tagger:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_author'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, author ? author : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_age_title'>Date:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_age'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, age ? age : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_commit_msg_title'>Message:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_commit_msg'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rt->tag_name) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='dotted_line'></div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='diff'>\n") == -1)
+		goto done;
+
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+done:
+	free(age);
+	free(author);
 	return error;
 }
 
@@ -1748,6 +1889,178 @@ static const struct got_error *
 gotweb_render_tags(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct repo_tag *rt = NULL;
+	struct server *srv = c->srv;
+	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
+	struct repo_dir *repo_dir = t->repo_dir;
+	char *smallerthan, *newline;
+	char *age = NULL;
+	int commit_found = 0;
+
+	if (qs->action == BRIEFS) {
+		qs->action = TAGS;
+		error = got_get_repo_tags(c, D_MAXSLCOMMDISP);
+	} else
+		error = got_get_repo_tags(c, srv->max_commits_display);
+	if (error)
+		goto done;
+
+	if (t->tag_count == 0)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tags_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='tags_title'>Tags</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='tags_content'>\n") == -1)
+		goto done;
+
+	TAILQ_FOREACH(rt, &t->repo_tags, entry) {
+		if (commit_found == 0 && qs->commit != NULL) {
+			if (strcmp(qs->commit, rt->commit_id) != 0)
+				continue;
+			else
+				commit_found = 1;
+		}
+		error = gotweb_get_time_str(&age, rt->tagger_time, TM_DIFF);
+		if (error)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='tag_age'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, age ? age : "") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='tag'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rt->tag_name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='tags_log'>") == -1)
+			goto done;
+		if (rt->tag_commit != NULL) {
+			newline = strchr(rt->tag_commit, '\n');
+			if (newline)
+				*newline = '\0';
+		}
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=tag&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rt->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (rt->tag_commit != NULL &&
+		    fcgi_gen_response(c, rt->tag_commit) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<div id='navs_wrapper'>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='navs'>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=tag&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rt->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "tag") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, " | ") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=briefs&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rt->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "commit briefs") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, " | ") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=commits&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rt->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "commits") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c,
+		    "<div id='dotted_line'></div>\n") == -1)
+			goto done;
+
+		free(age);
+		age = NULL;
+	}
+	if (t->next_id || t->prev_id) {
+		error = gotweb_render_navs(c);
+		if (error)
+			goto done;
+	}
+	fcgi_gen_response(c, "</div>\n");
+done:
+	free(age);
 	return error;
 }
 
