@@ -172,22 +172,20 @@ gotweb_process_request(struct request *c)
 		html = 1;
 	}
 
+	error = gotweb_render_header(c);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		goto err;
+	}
+
 	if (qs->action != INDEX) {
 		error = gotweb_init_repo_dir(&repo_dir, qs->path);
 		if (error)
 			goto done;
 		error = gotweb_load_got_path(c, repo_dir);
 		c->t->repo_dir = repo_dir;
-		if (error && error->code == GOT_ERR_NOT_GIT_REPO)
-			error = NULL;
-		else if (error && error->code != GOT_ERR_LONELY_PACKIDX)
+		if (error && error->code != GOT_ERR_LONELY_PACKIDX)
 			goto err;
-	}
-
-	error = gotweb_render_header(c);
-	if (error) {
-		log_warnx("%s: %s", __func__, error->msg);
-		goto err;
 	}
 
 	switch(qs->action) {
@@ -293,7 +291,7 @@ err:
 	if (html && fcgi_gen_response(c, "</div>\n") == -1)
 		return;
 done:
-	if (qs->action != INDEX)
+	if (c->t->repo != NULL && qs->action != INDEX)
 		got_repo_close(c->t->repo);
 	if (html && srv != NULL)
 		gotweb_render_footer(c);
@@ -344,7 +342,6 @@ gotweb_init_transport(struct transport **t)
 	(*t)->prev_id = NULL;
 	(*t)->next_disp = 0;
 	(*t)->prev_disp = 0;
-	(*t)->headref = GOT_REF_HEAD;
 
 	return error;
 }
@@ -362,7 +359,10 @@ gotweb_init_querystring(struct querystring **qs)
 	(*qs)->commit = NULL;
 	(*qs)->file = NULL;
 	(*qs)->folder = NULL;
-	(*qs)->headref = NULL;
+	(*qs)->headref = strdup("HEAD");
+	if ((*qs)->headref == NULL) {
+		return got_error_from_errno2("%s: strdup", __func__);
+	}
 	(*qs)->index_page = 0;
 	(*qs)->index_page_str = NULL;
 	(*qs)->path = NULL;
@@ -830,9 +830,9 @@ gotweb_render_navs(struct request *c)
 		if (t->prev_id && qs->commit != NULL &&
 		    strcmp(qs->commit, t->prev_id) != 0) {
 			if (asprintf(&phref, "index_page=%d&&path=%s"
-			    "&action=briefs&commit=%s",
-			    qs->index_page, qs->path,
-			    t->prev_id) == -1) {
+			    "&action=briefs&commit=%s&headref=%s",
+			    qs->index_page, qs->path, t->prev_id,
+			    qs->headref) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -844,9 +844,9 @@ gotweb_render_navs(struct request *c)
 		if (t->prev_id && qs->commit != NULL &&
 		    strcmp(qs->commit, t->prev_id) != 0) {
 			if (asprintf(&phref, "index_page=%d&&path=%s"
-			    "&action=commits&commit=%s",
-			    qs->index_page, qs->path,
-			    t->prev_id) == -1) {
+			    "&action=commits&commit=%s&headref=%s",
+			    qs->index_page, qs->path, t->prev_id,
+			    qs->headref) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -858,9 +858,9 @@ gotweb_render_navs(struct request *c)
 		if (t->prev_id && qs->commit != NULL &&
 		    strcmp(qs->commit, t->prev_id) != 0) {
 			if (asprintf(&phref, "index_page=%d&&path=%s"
-			    "&action=tags&commit=%s",
-			    qs->index_page, qs->path,
-			    t->prev_id) == -1) {
+			    "&action=tags&commit=%s&headref=%s",
+			    qs->index_page, qs->path, t->prev_id,
+			    qs->headref) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -905,8 +905,9 @@ gotweb_render_navs(struct request *c)
 	case BRIEFS:
 		if (t->next_id) {
 			if (asprintf(&nhref, "index_page=%d&path=%s"
-			    "&action=briefs&commit=%s",
-			    qs->index_page, qs->path, t->next_id) == -1) {
+			    "&action=briefs&commit=%s&headref=%s",
+			    qs->index_page, qs->path, t->next_id,
+			    qs->headref) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -917,8 +918,9 @@ gotweb_render_navs(struct request *c)
 	case COMMITS:
 		if (t->next_id) {
 			if (asprintf(&nhref, "index_page=%d&path=%s"
-			    "&action=commits&commit=%s",
-			    qs->index_page, qs->path, t->next_id) == -1) {
+			    "&action=commits&commit=%s&headref=%s",
+			    qs->index_page, qs->path, t->next_id,
+			    qs->headref) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -929,8 +931,9 @@ gotweb_render_navs(struct request *c)
 	case TAGS:
 		if (t->next_id) {
 			if (asprintf(&nhref, "index_page=%d&path=%s"
-			    "&action=tags&commit=%s",
-			    qs->index_page, qs->path, t->next_id) == -1) {
+			    "&action=tags&commit=%s&headref=%s",
+			    qs->index_page, qs->path, t->next_id,
+			    qs->headref) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -1800,6 +1803,12 @@ gotweb_render_tag(struct request *c)
 	if (error)
 		goto done;
 
+	if (t->tag_count == 0) {
+		error = got_error_set_errno(GOT_ERR_BAD_OBJ_ID,
+		    "bad commit id");
+		goto done;
+	}
+
 	rt = TAILQ_LAST(&t->repo_tags, repo_tags_head);
 
 	error = gotweb_get_time_str(&age, rt->tagger_time, TM_LONG);
@@ -1913,9 +1922,6 @@ gotweb_render_tags(struct request *c)
 	} else
 		error = got_get_repo_tags(c, srv->max_commits_display);
 	if (error)
-		goto done;
-
-	if (t->tag_count == 0)
 		goto done;
 
 	if (fcgi_gen_response(c, "<div id='tags_title_wrapper'>\n") == -1)
@@ -2079,6 +2085,15 @@ static const struct got_error *
 gotweb_render_tree(struct request *c)
 {
 	const struct got_error *error = NULL;
+
+	if (fcgi_gen_response(c, "<div id='tree_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='tree_title'>Tree</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+done:
 	return error;
 }
 

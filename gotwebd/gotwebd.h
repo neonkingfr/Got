@@ -174,7 +174,6 @@ struct transport {
 	struct got_repository	*repo;
 	struct repo_dir		*repo_dir;
 	struct querystring	*qs;
-	const char		*headref;
 	char			*next_id;
 	char			*prev_id;
 	unsigned int		 repos_total;
@@ -343,6 +342,8 @@ struct gotwebd {
 struct querystring {
 	uint8_t		 action;
 	char		*commit;
+	char		*previd;
+	char		*prevset;
 	char		*file;
 	char		*folder;
 	char		*headref;
@@ -369,6 +370,7 @@ enum querystring_elements {
 	HEADREF,
 	INDEX_PAGE,
 	PATH,
+	PREVID,
 	QSELEM__MAX,
 };
 
@@ -424,6 +426,7 @@ const struct got_error *got_get_repo_age(char **, struct request *, char *,
     const char *, int);
 const struct got_error *got_get_repo_commits(struct request *, int);
 const struct got_error *got_get_repo_tags(struct request *, int);
+const struct got_error *got_get_repo_heads(struct request *);
 const struct got_error *got_output_diff(struct request *);
 
 /* config.c */

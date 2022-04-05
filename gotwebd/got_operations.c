@@ -320,7 +320,7 @@ got_get_repo_commits(struct request *c, int limit)
 	struct got_commit_object *commit = NULL;
 	struct got_reflist_head refs;
 	struct got_reference *ref;
-	struct repo_commit *repo_commit = NULL, *r_s = NULL;
+	struct repo_commit *repo_commit = NULL, *rs = NULL;
 	struct server *srv = c->srv;
 	struct transport *t = c->t;
 	struct got_repository *repo = t->repo;
@@ -328,7 +328,6 @@ got_get_repo_commits(struct request *c, int limit)
 	struct repo_dir *repo_dir = t->repo_dir;
 	char *in_repo_path = NULL, *repo_path = NULL;
 	int chk_next = 0, chk_multi = 0, commit_found = 0, c_cnt = 0;
-	int obj_type;
 
 	TAILQ_INIT(&refs);
 
@@ -340,9 +339,14 @@ got_get_repo_commits(struct request *c, int limit)
 	if (error)
 		return error;
 
-	if (qs->commit == NULL || qs->action == COMMITS ||
-	    qs->action == BRIEFS || qs->action == SUMMARY) {
-		error = got_ref_open(&ref, repo, t->headref, 0);
+	/*
+	 * XXX: previous link is now broken because we don't collect everything
+	 * this is how it should be, but something creative needs to be done to
+	 * get the previous commit id
+	 */
+	if (qs->commit == NULL && (qs->action == COMMITS ||
+	    qs->action == BRIEFS || qs->action == SUMMARY)) {
+		error = got_ref_open(&ref, repo, qs->headref, 0);
 		if (error)
 			goto err;
 		error = got_ref_resolve(&id, repo, ref);
@@ -350,40 +354,41 @@ got_get_repo_commits(struct request *c, int limit)
 		if (error)
 			goto err;
 	} else {
-		error = got_ref_open(&ref, repo, qs->commit, 0);
-		if (error == NULL) {
-			error = got_ref_resolve(&id, repo, ref);
-			if (error)
-				goto err;
-			error = got_object_get_type(&obj_type, repo, id);
-			got_ref_close(ref);
-			if (error)
-				goto err;
-			if (obj_type == GOT_OBJ_TYPE_TAG) {
-				struct got_tag_object *tag;
-				error = got_object_open_as_tag(&tag, repo, id);
-				if (error)
-					goto err;
-				if (got_object_tag_get_object_type(tag) !=
-				    GOT_OBJ_TYPE_COMMIT) {
-					got_object_tag_close(tag);
-					error = got_error(GOT_ERR_OBJ_TYPE);
-					goto err;
-				}
-				free(id);
-				id = got_object_id_dup(
-				    got_object_tag_get_object_id(tag));
-				if (id == NULL)
-					error = got_error_from_errno(
-					    "got_object_id_dup");
-				got_object_tag_close(tag);
-				if (error)
-					goto err;
-			} else if (obj_type != GOT_OBJ_TYPE_COMMIT) {
-				error = got_error(GOT_ERR_OBJ_TYPE);
-				goto err;
-			}
-		}
+		/* XXX: I don't think this is needed */
+		/* error = got_ref_open(&ref, repo, qs->commit, 0); */
+		/* if (error == NULL) { */
+		/* 	error = got_ref_resolve(&id, repo, ref); */
+		/* 	if (error) */
+		/* 		goto err; */
+		/* 	error = got_object_get_type(&obj_type, repo, id); */
+		/* 	got_ref_close(ref); */
+		/* 	if (error) */
+		/* 		goto err; */
+		/* 	if (obj_type == GOT_OBJ_TYPE_TAG) { */
+		/* 		struct got_tag_object *tag; */
+		/* 		error = got_object_open_as_tag(&tag, repo, id); */
+		/* 		if (error) */
+		/* 			goto err; */
+		/* 		if (got_object_tag_get_object_type(tag) != */
+		/* 		    GOT_OBJ_TYPE_COMMIT) { */
+		/* 			got_object_tag_close(tag); */
+		/* 			error = got_error(GOT_ERR_OBJ_TYPE); */
+		/* 			goto err; */
+		/* 		} */
+		/* 		free(id); */
+		/* 		id = got_object_id_dup( */
+		/* 		    got_object_tag_get_object_id(tag)); */
+		/* 		if (id == NULL) */
+		/* 			error = got_error_from_errno( */
+		/* 			    "got_object_id_dup"); */
+		/* 		got_object_tag_close(tag); */
+		/* 		if (error) */
+		/* 			goto err; */
+		/* 	} else if (obj_type != GOT_OBJ_TYPE_COMMIT) { */
+		/* 		error = got_error(GOT_ERR_OBJ_TYPE); */
+		/* 		goto err; */
+		/* 	} */
+		/* } */
 		error = got_repo_match_object_id_prefix(&id, qs->commit,
 		    GOT_OBJ_TYPE_COMMIT, repo);
 		if (error)
@@ -505,26 +510,26 @@ done:
 	 * we have tailq populated, so find previous commit id
 	 * for navigation through briefs and commits
 	 */
-	if (t->prev_id == NULL && qs->commit != NULL &&
-	    (qs->action == BRIEFS || qs->action == COMMITS)) {
-		commit_found = 0;
-		TAILQ_FOREACH_REVERSE(r_s, &t->repo_commits, repo_commits_head,
-		    entry) {
-			if (commit_found == 0 &&
-			    strcmp(qs->commit, r_s->commit_id) != 0) {
-				continue;
-			} else
-				commit_found = 1;
-			if (c_cnt == srv->max_commits_display ||
-			    r_s == TAILQ_FIRST(&t->repo_commits)) {
-				t->prev_id = strdup(r_s->commit_id);
-				if (t->prev_id == NULL)
-					error = got_error_from_errno("strdup");
-				break;
-			}
-			c_cnt++;
-		}
-	}
+	/* if (t->prev_id == NULL && qs->commit != NULL && */
+	/*     (qs->action == BRIEFS || qs->action == COMMITS)) { */
+	/* 	commit_found = 0; */
+	/* 	TAILQ_FOREACH_REVERSE(rs, &t->repo_commits, repo_commits_head, */
+	/* 	    entry) { */
+	/* 		if (commit_found == 0 && */
+	/* 		    strcmp(qs->commit, rs->commit_id) != 0) { */
+	/* 			continue; */
+	/* 		} else */
+	/* 			commit_found = 1; */
+	/* 		if (c_cnt == srv->max_commits_display || */
+	/* 		    rs == TAILQ_FIRST(&t->repo_commits)) { */
+	/* 			t->prev_id = strdup(rs->commit_id); */
+	/* 			if (t->prev_id == NULL) */
+	/* 				error = got_error_from_errno("strdup"); */
+	/* 			break; */
+	/* 		} */
+	/* 		c_cnt++; */
+	/* 	} */
+	/* } */
 err:
 	gotweb_free_repo_commit(repo_commit);
 	if (commit)
@@ -552,11 +557,10 @@ got_get_repo_tags(struct request *c, int limit)
 	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = t->repo_dir;
 	struct got_tag_object *tag = NULL;
-	struct repo_tag *r_t = NULL;
+	struct repo_tag *rt = NULL, *trt = NULL;
 	char *in_repo_path = NULL, *repo_path = NULL, *id_str = NULL;
 	char *commit_msg = NULL, *commit_msg0 = NULL;
 	int chk_next = 0, chk_multi = 1, commit_found = 0, c_cnt = 0;
-	int obj_type;
 
 	TAILQ_INIT(&refs);
 
@@ -567,49 +571,53 @@ got_get_repo_tags(struct request *c, int limit)
 	if (error)
 		return error;
 
-	if (qs->commit == NULL) {
-		error = got_ref_open(&ref, repo, t->headref, 0);
+	if (qs->commit == NULL && qs->action == TAGS) {
+		error = got_ref_open(&ref, repo, qs->headref, 0);
 		if (error)
 			goto err;
 		error = got_ref_resolve(&id, repo, ref);
 		got_ref_close(ref);
 		if (error)
 			goto err;
+	} else if (qs-> commit == NULL && qs->action == TAG) {
+		error = got_error_msg(GOT_ERR_EOF, "commit id missing");
+		goto err;
 	} else {
-		error = got_ref_open(&ref, repo, qs->commit, 0);
-		if (error == NULL) {
-			error = got_ref_resolve(&id, repo, ref);
-			if (error)
-				goto err;
-			error = got_object_get_type(&obj_type, repo, id);
-			got_ref_close(ref);
-			if (error)
-				goto err;
-			if (obj_type == GOT_OBJ_TYPE_TAG) {
-				struct got_tag_object *tag;
-				error = got_object_open_as_tag(&tag, repo, id);
-				if (error)
-					goto err;
-				if (got_object_tag_get_object_type(tag) !=
-				    GOT_OBJ_TYPE_COMMIT) {
-					got_object_tag_close(tag);
-					error = got_error(GOT_ERR_OBJ_TYPE);
-					goto err;
-				}
-				free(id);
-				id = got_object_id_dup(
-				    got_object_tag_get_object_id(tag));
-				if (id == NULL)
-					error = got_error_from_errno(
-					    "got_object_id_dup");
-				got_object_tag_close(tag);
-				if (error)
-					goto err;
-			} else if (obj_type != GOT_OBJ_TYPE_COMMIT) {
-				error = got_error(GOT_ERR_OBJ_TYPE);
-				goto err;
-			}
-		}
+		/* XXX: I don't think this is needed */
+		/* error = got_ref_open(&ref, repo, qs->commit, 0); */
+		/* if (error == NULL) { */
+		/* 	error = got_ref_resolve(&id, repo, ref); */
+		/* 	if (error) */
+		/* 		goto err; */
+		/* 	error = got_object_get_type(&obj_type, repo, id); */
+		/* 	got_ref_close(ref); */
+		/* 	if (error) */
+		/* 		goto err; */
+		/* 	if (obj_type == GOT_OBJ_TYPE_TAG) { */
+		/* 		struct got_tag_object *tag; */
+		/* 		error = got_object_open_as_tag(&tag, repo, id); */
+		/* 		if (error) */
+		/* 			goto err; */
+		/* 		if (got_object_tag_get_object_type(tag) != */
+		/* 		    GOT_OBJ_TYPE_COMMIT) { */
+		/* 			got_object_tag_close(tag); */
+		/* 			error = got_error(GOT_ERR_OBJ_TYPE); */
+		/* 			goto err; */
+		/* 		} */
+		/* 		free(id); */
+		/* 		id = got_object_id_dup( */
+		/* 		    got_object_tag_get_object_id(tag)); */
+		/* 		if (id == NULL) */
+		/* 			error = got_error_from_errno( */
+		/* 			    "got_object_id_dup"); */
+		/* 		got_object_tag_close(tag); */
+		/* 		if (error) */
+		/* 			goto err; */
+		/* 	} else if (obj_type != GOT_OBJ_TYPE_COMMIT) { */
+		/* 		error = got_error(GOT_ERR_OBJ_TYPE); */
+		/* 		goto err; */
+		/* 	} */
+		/* } */
 		error = got_repo_match_object_id_prefix(&id, qs->commit,
 		    GOT_OBJ_TYPE_COMMIT, repo);
 		if (error)
@@ -640,6 +648,14 @@ got_get_repo_tags(struct request *c, int limit)
 
 	if (limit == 1)
 		chk_multi = 0;
+
+	/*
+	 * XXX: there needs to be a better way to do this
+	 * as it goes, every tag is collected and matched against
+	 * it would be better to match like commit and go forward, but
+	 * this would break the previous button like commits. you're missing
+	 * something here so come back to it.
+	 */
 
 	TAILQ_FOREACH(re, &refs, entry) {
 		struct repo_tag *new_repo_tag = NULL;
@@ -786,18 +802,24 @@ done:
 	 * we have tailq populated, so find previous commit id
 	 * for navigation through briefs and commits
 	 */
-	if (t->prev_id == NULL && qs->commit != NULL) {
+	if (t->tag_count == 0) {
+		TAILQ_FOREACH_SAFE(rt, &t->repo_tags, entry, trt) {
+			TAILQ_REMOVE(&t->repo_tags, rt, entry);
+			gotweb_free_repo_tag(rt);
+		}
+	}
+	if (t->tag_count > 0 && t->prev_id == NULL && qs->commit != NULL) {
 		commit_found = 0;
-		TAILQ_FOREACH_REVERSE(r_t, &t->repo_tags, repo_tags_head,
+		TAILQ_FOREACH_REVERSE(rt, &t->repo_tags, repo_tags_head,
 		    entry) {
 			if (commit_found == 0 &&
-			    strcmp(qs->commit, r_t->commit_id) != 0) {
+			    strcmp(qs->commit, rt->commit_id) != 0) {
 				continue;
 			} else
 				commit_found = 1;
 			if (c_cnt == srv->max_commits_display ||
-			    r_t == TAILQ_FIRST(&t->repo_tags)) {
-				t->prev_id = strdup(r_t->commit_id);
+			    rt == TAILQ_FIRST(&t->repo_tags)) {
+				t->prev_id = strdup(rt->commit_id);
 				if (t->prev_id == NULL)
 					error = got_error_from_errno("strdup");
 				break;
