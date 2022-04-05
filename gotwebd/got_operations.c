@@ -342,6 +342,7 @@ got_get_repo_commits(struct request *c, int limit)
 	struct repo_dir *repo_dir = t->repo_dir;
 	char *in_repo_path = NULL, *repo_path = NULL;
 	int chk_next = 0, chk_multi = 0, commit_found = 0, c_cnt = 0;
+	int obj_type;
 
 	TAILQ_INIT(&refs);
 
@@ -360,15 +361,57 @@ got_get_repo_commits(struct request *c, int limit)
 	 * only be itereated forward. So, we have to build the queue from the
 	 * headref and match, which slows down page loading on large repos, when
 	 * looking at old commits. Some kind of better caching must be
-	 * investigated.
+	 * investigated. This is only relevant to commits/briefs.
 	 */
-	error = got_ref_open(&ref, repo, qs->headref, 0);
-	if (error)
-		goto err;
-	error = got_ref_resolve(&id, repo, ref);
-	got_ref_close(ref);
-	if (error)
-		goto err;
+	if (qs->action == BRIEFS || qs->action == COMMITS) {
+		error = got_ref_open(&ref, repo, qs->headref, 0);
+		if (error)
+			goto err;
+
+		error = got_ref_resolve(&id, repo, ref);
+		got_ref_close(ref);
+		if (error)
+			goto err;
+	} else if (qs->commit != NULL) {
+		error = got_ref_open(&ref, repo, qs->commit, 0);
+		if (error == NULL) {
+			error = got_ref_resolve(&id, repo, ref);
+			if (error)
+				goto err;
+			error = got_object_get_type(&obj_type, repo, id);
+			got_ref_close(ref);
+			if (error)
+				goto err;
+			if (obj_type == GOT_OBJ_TYPE_TAG) {
+				struct got_tag_object *tag;
+				error = got_object_open_as_tag(&tag, repo, id);
+				if (error)
+					goto err;
+				if (got_object_tag_get_object_type(tag) !=
+				    GOT_OBJ_TYPE_COMMIT) {
+					got_object_tag_close(tag);
+					error = got_error(GOT_ERR_OBJ_TYPE);
+					goto err;
+				}
+				free(id);
+				id = got_object_id_dup(
+				    got_object_tag_get_object_id(tag));
+				if (id == NULL)
+					error = got_error_from_errno(
+					    "got_object_id_dup");
+				got_object_tag_close(tag);
+				if (error)
+					goto err;
+			} else if (obj_type != GOT_OBJ_TYPE_COMMIT) {
+				error = got_error(GOT_ERR_OBJ_TYPE);
+				goto err;
+			}
+		}
+		error = got_repo_match_object_id_prefix(&id, qs->commit,
+		    GOT_OBJ_TYPE_COMMIT, repo);
+		if (error)
+			goto err;
+	}
 
 	error = got_repo_map_path(&in_repo_path, repo, repo_path);
 	if (error)
