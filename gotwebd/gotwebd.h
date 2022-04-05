@@ -144,6 +144,43 @@ struct fcgi_response {
 	size_t				data_len;
 };
 
+struct repo_dir {
+	char			*name;
+	char			*owner;
+	char			*description;
+	char			*url;
+	char			*age;
+	char			*path;
+};
+
+struct repo_commit {
+	TAILQ_ENTRY(repo_commit)	 entry;
+	char				*path;
+
+	char			*refs_str;
+	char			*commit_id; /* id_str1 */
+	char			*parent_id; /* id_str2 */
+	char			*tree_id;
+	char			*author;
+	char			*committer;
+	char			*commit_msg;
+	time_t			 committer_time;
+};
+
+struct got_repository;
+struct transport {
+	TAILQ_HEAD(repo_commits, repo_commit) repo_commits;
+	struct got_repository	*repo;
+	struct repo_dir		*repo_dir;
+	struct querystring	*qs;
+	char			*next_id;
+	char			*next_prev_id;
+	unsigned int		 repos_total;
+	unsigned int		 next_disp;
+	unsigned int		 prev_disp;
+	const char		*headref;
+};
+
 struct request {
 	struct socket			*sock;
 	struct server			*srv;
@@ -307,6 +344,8 @@ struct querystring {
 	char		*file;
 	char		*folder;
 	char		*headref;
+	unsigned int	 index_page;
+	char		*index_page_str;
 	unsigned int	 page;
 	char		*page_str;
 	char		*path;
@@ -330,6 +369,7 @@ enum querystring_elements {
 	RFILE,
 	FOLDER,
 	HEADREF,
+	INDEX_PAGE,
 	PAGE,
 	PATH,
 	PREV,
@@ -388,6 +428,7 @@ const struct got_error *got_tests(struct querystring *);
 const struct got_error *got_get_repo_owner(char **, struct server *, char *);
 const struct got_error *got_get_repo_age(char **, struct server *, char *,
     const char *, int);
+const struct got_error *got_get_repo_commits(struct request *, int);
 
 /* config.c */
 int config_setserver(struct gotwebd *, struct server *);

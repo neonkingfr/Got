@@ -63,6 +63,7 @@ static const struct querystring_keys querystring_keys[] = {
 	{ "file",	RFILE },
 	{ "folder",	FOLDER },
 	{ "headref",	HEADREF },
+	{ "index_page",	INDEX_PAGE },
 	{ "page",	PAGE },
 	{ "path",	PATH },
 	{ "prev",	PREV },
@@ -81,44 +82,6 @@ static const struct action_keys action_keys[] = {
 	{ "tag",	TAG },
 	{ "tags",	TAGS },
 	{ "tree",	TREE },
-};
-
-struct repo_dir {
-	char			*name;
-	char			*owner;
-	char			*description;
-	char			*url;
-	char			*age;
-	char			*path;
-};
-
-struct repo_commit {
-	TAILQ_ENTRY(repo_commit)	 entry;
-	struct got_reflist_head		 refs;
-	char				*path;
-
-	char			*refs_str;
-	char			*commit_id; /* id_str1 */
-	char			*parent_id; /* id_str2 */
-	char			*tree_id;
-	char			*author;
-	char			*committer;
-	char			*commit_msg;
-	time_t			 committer_time;
-};
-
-struct transport {
-	TAILQ_HEAD(repo_commits, repo_commit) repo_commits;
-	struct repo_dir		*repo_dir;
-	struct querystring	*qs;
-	char			*next_id;
-	char			*next_prev_id;
-	char			*prev_id;
-	char			*prev_prev_id;
-	char			*commit_id;
-	unsigned int		 repos_total;
-	unsigned int		 next_disp;
-	unsigned int		 prev_disp;
 };
 
 static const struct got_error *gotweb_init_querystring(struct querystring **);
@@ -151,6 +114,7 @@ static const struct got_error *gotweb_render_tag(struct request *);
 static const struct got_error *gotweb_render_tags(struct request *);
 static const struct got_error *gotweb_render_tree(struct request *);
 
+static void gotweb_free_commit(struct repo_commit *);
 static void gotweb_free_querystring(struct querystring *);
 static void gotweb_free_repo_dir(struct repo_dir *);
 
@@ -185,11 +149,15 @@ gotweb_process_request(struct request *c)
 	uint8_t err[] = "gotwebd experienced an error: ";
 	int erre = 0, h_s = 0;
 
-	/* don't process any further if client disconnected */
-	if (c->sock->client_status == CLIENT_DISCONNECT) {
-		fcgi_cleanup_request(c);
-		return;
+	/* init the transport */
+	error = gotweb_init_transport(&c->t);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		goto err;
 	}
+	/* don't process any further if client disconnected */
+	if (c->sock->client_status == CLIENT_DISCONNECT)
+		return;
 	/* get the gotwebd server */
 	srv = gotweb_get_server(c->document_root, c->http_host);
 	if (srv == NULL) {
@@ -197,12 +165,6 @@ gotweb_process_request(struct request *c)
 		goto err;
 	}
 	c->srv = srv;
-	/* init the transport */
-	error = gotweb_init_transport(&c->t);
-	if (error) {
-		log_warnx("%s: %s", __func__, error->msg);
-		goto err;
-	}
 	/* parse our querystring */
 	error = gotweb_init_querystring(&qs);
 	if (error) {
@@ -404,15 +366,16 @@ gotweb_init_transport(struct transport **t)
 	if (*t == NULL)
 		return got_error_from_errno2("%s: calloc", __func__);
 
+	TAILQ_INIT(&(*t)->repo_commits);
+
+	(*t)->repo = NULL;
 	(*t)->repo_dir = NULL;
 	(*t)->qs = NULL;
 	(*t)->next_id = NULL;
 	(*t)->next_prev_id = NULL;
-	(*t)->prev_id = NULL;
-	(*t)->prev_prev_id = NULL;
-	(*t)->commit_id = NULL;
-	(*t)->prev_disp = 0;
 	(*t)->next_disp = 0;
+	(*t)->prev_disp = 0;
+	(*t)->headref = GOT_REF_HEAD;
 
 	return error;
 }
@@ -431,10 +394,13 @@ gotweb_init_querystring(struct querystring **qs)
 	(*qs)->file = NULL;
 	(*qs)->folder = NULL;
 	(*qs)->headref = NULL;
+	(*qs)->index_page = 0;
+	(*qs)->index_page_str = NULL;
 	(*qs)->path = NULL;
 	(*qs)->prev = NULL;
 	(*qs)->prev_prev = NULL;
 	(*qs)->page = 0;
+	(*qs)->page_str = NULL;
 
 	return error;
 }
@@ -547,6 +513,23 @@ qa_found:
 				goto done;
 			}
 			break;
+		case INDEX_PAGE:
+			if (strlen(value) == 0)
+				break;
+			(*qs)->index_page_str = strdup(value);
+			if ((*qs)->index_page_str == NULL) {
+				error = got_error_from_errno2("%s: strdup",
+				    __func__);
+				goto done;
+			}
+			(*qs)->index_page = strtonum(value, INT64_MIN,
+			    INT64_MAX, &errstr);
+			if (errstr) {
+				error = got_error_from_errno3("%s: strtonum %s",
+				    __func__, errstr);
+				goto done;
+			}
+			break;
 		case PAGE:
 			if (strlen(value) == 0)
 				break;
@@ -597,6 +580,22 @@ done:
 }
 
 static void
+gotweb_free_repo_commit(struct repo_commit *rc)
+{
+	if (rc != NULL) {
+		free(rc->path);
+		free(rc->author);
+		free(rc->committer);
+		free(rc->refs_str);
+		free(rc->commit_id);
+		free(rc->parent_id);
+		free(rc->tree_id);
+		free(rc->commit_msg);
+	}
+	free(rc);
+}
+
+static void
 gotweb_free_querystring(struct querystring *qs)
 {
 	if (qs != NULL) {
@@ -634,9 +633,6 @@ gotweb_free_transport(struct transport *t)
 	if (t != NULL) {
 		free(t->next_id);
 		free(t->next_prev_id);
-		free(t->prev_id);
-		free(t->prev_prev_id);
-		free(t->commit_id);
 	}
 	free(t);
 }
@@ -690,7 +686,7 @@ gotweb_render_header(struct request *c)
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
-	if (asprintf(&gotlink, "<a href='%s' target='_sotd'>\n",
+	if (asprintf(&gotlink, "<a href='%s' target='_sotd'>",
 	    srv->logo_url) == -1) {
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
@@ -700,8 +696,9 @@ gotweb_render_header(struct request *c)
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
-	if (asprintf(&sitelink, "<a href='/%s?page=%d' alt='sitelink'>%s</a>\n",
-	    c->document_root, qs->page, srv->site_link) == -1) {
+	if (asprintf(&sitelink, "<a href='/%s?index_page=%d' "
+	    "alt='sitelink'>%s</a>", c->document_root, qs->index_page,
+	    srv->site_link) == -1) {
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
@@ -751,7 +748,7 @@ gotweb_render_header(struct request *c)
 	if (fcgi_gen_response(c, "</div>\n</div>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c,
-	    "<div id='site_path'>\n<div id='site_link'>\n") == -1)
+	    "<div id='site_path'>\n<div id='site_link'>") == -1)
 		goto done;
 	if (fcgi_gen_response(c, sitelink) == -1)
 		goto done;
@@ -847,21 +844,36 @@ static const struct got_error *
 gotweb_render_navs(struct request *c)
 {
 	const struct got_error *error = NULL;
-	struct querystring *qs = c->t->qs;
 	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
 	struct server *srv = c->srv;
 	char *nhref = NULL, *phref = NULL;
 	int disp = 0;
 
 	if (fcgi_gen_response(c, "<div id='np_wrapper'>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "<div id='nav_prev'>\n") == -1)
+	if (fcgi_gen_response(c, "<div id='nav_prev'>") == -1)
 		goto done;
 
 	switch(qs->action) {
 	case INDEX:
-		if (qs->page > 0) {
-			if (asprintf(&phref, "page=%d", qs->page - 1) == -1) {
+		if (qs->index_page > 0) {
+			if (asprintf(&phref, "index_page=%d",
+			    qs->index_page - 1) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			disp = 1;
+		}
+		break;
+	case BRIEFS:
+		if (qs->page > 0 && qs->prev) {
+			if (asprintf(&phref, "index_page=%d&page=%d&path=%s"
+			    "&action=briefs&commit=%s&prev=%s",
+			    qs->index_page, qs->page - 1, qs->path,
+			    qs->prev ? qs->prev : "",
+			    qs->prev_prev ? qs->prev_prev : "") == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
@@ -873,6 +885,7 @@ gotweb_render_navs(struct request *c)
 		disp = 0;
 		break;
 	}
+
 	if (disp) {
 		if (fcgi_gen_response(c, "<a href='?") == -1)
 			goto  done;
@@ -883,7 +896,7 @@ gotweb_render_navs(struct request *c)
 	}
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "<div id='nav_next'>\n") == -1)
+	if (fcgi_gen_response(c, "<div id='nav_next'>") == -1)
 		goto done;
 
 	disp = 0;
@@ -891,19 +904,34 @@ gotweb_render_navs(struct request *c)
 	switch(qs->action) {
 	case INDEX:
 		if (t->next_disp == srv->max_repos_display &&
-		    t->repos_total != (qs->page + 1) *
+		    t->repos_total != (qs->index_page + 1) *
 		    srv->max_repos_display) {
-			if (asprintf(&nhref, "page=%d", qs->page + 1) == -1) {
+			if (asprintf(&nhref, "index_page=%d",
+			    qs->index_page + 1) == -1) {
 				error = got_error_from_errno2("%s: asprintf",
 				    __func__);
 				goto done;
 			}
 			disp = 1;
-			break;
-		default:
-			disp = 0;
-			break;
 		}
+		break;
+	case BRIEFS:
+		if (t->next_id) {
+			if (asprintf(&nhref, "index_page=%d&page=%d&path=%s"
+			    "&action=briefs&commit=%s&prev=%s&prev_prev=%s",
+			    qs->index_page, qs->page + 1, qs->path,
+			    t->next_id, t->next_prev_id ? t->next_prev_id : "",
+			    qs->prev ? qs->prev : "") == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			disp = 1;
+		}
+		break;
+	default:
+		disp = 0;
+		break;
 	}
 	if (disp) {
 		if (fcgi_gen_response(c, "<a href='?") == -1)
@@ -928,7 +956,8 @@ gotweb_render_index(struct request *c)
 {
 	const struct got_error *error = NULL;
 	struct server *srv = c->srv;
-	struct querystring *qs = c->t->qs;
+	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = NULL;
 	DIR *d;
 	struct dirent **sd_dent;
@@ -962,7 +991,7 @@ gotweb_render_index(struct request *c)
 
 		if (lstat(c_path, &st) == 0 && S_ISDIR(st.st_mode) &&
 		    !got_path_dir_is_empty(c_path))
-		c->t->repos_total++;
+		t->repos_total++;
 		free(c_path);
 		c_path = NULL;
 	}
@@ -995,9 +1024,9 @@ gotweb_render_index(struct request *c)
 		    strcmp(sd_dent[d_i]->d_name, "..") == 0)
 			continue;
 
-		if (qs->page > 0 && (qs->page *
-		    srv->max_repos_display) > c->t->prev_disp) {
-			c->t->prev_disp++;
+		if (qs->index_page > 0 && (qs->index_page *
+		    srv->max_repos_display) > t->prev_disp) {
+			t->prev_disp++;
 			continue;
 		}
 
@@ -1024,15 +1053,15 @@ gotweb_render_index(struct request *c)
 		}
 render:
 		d_disp++;
-		c->t->prev_disp++;
+		t->prev_disp++;
 		if (fcgi_gen_response(c, "<div id='index_wrapper'>\n") == -1)
 			goto done;
-		if (fcgi_gen_response(c, "<div id='index_project'>\n") == -1)
+		if (fcgi_gen_response(c, "<div id='index_project'>") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1060,7 +1089,7 @@ render:
 
 		if (srv->show_repo_owner) {
 			if (fcgi_gen_response(c,
-			    "<div id='index_project_owner'>\n") == -1)
+			    "<div id='index_project_owner'>") == -1)
 				goto done;
 			if (fcgi_gen_response(c, repo_dir->owner) == -1)
 				goto done;
@@ -1070,7 +1099,7 @@ render:
 
 		if (srv->show_repo_age) {
 			if (fcgi_gen_response(c,
-			    "<div id='index_project_age'>\n") == -1)
+			    "<div id='index_project_age'>") == -1)
 				goto done;
 			if (fcgi_gen_response(c, repo_dir->age) == -1)
 				goto done;
@@ -1083,9 +1112,9 @@ render:
 		if (fcgi_gen_response(c, "<div id='navs'>") == -1)
 			goto done;;
 
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1098,9 +1127,9 @@ render:
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1113,9 +1142,9 @@ render:
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1128,9 +1157,9 @@ render:
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1143,9 +1172,9 @@ render:
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
 			goto done;
-		if (fcgi_gen_response(c, qs->page_str) == -1)
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
@@ -1167,10 +1196,10 @@ render:
 		if (fcgi_gen_response(c, "</div>\n") == -1)
 			goto done;
 
-		/* gotweb_free_repo_dir(repo_dir); */
-		/* repo_dir = NULL; */
+		gotweb_free_repo_dir(repo_dir);
+		repo_dir = NULL;
 
-		c->t->next_disp++;
+		t->next_disp++;
 		if (d_disp == srv->max_repos_display)
 			break;
 	}
@@ -1178,11 +1207,13 @@ render:
 		goto div;
 	if (srv->max_repos > 0 && srv->max_repos < srv->max_repos_display)
 		goto div;
-	if (c->t->repos_total <= srv->max_repos ||
-	    c->t->repos_total <= srv->max_repos_display)
+	if (t->repos_total <= srv->max_repos ||
+	    t->repos_total <= srv->max_repos_display)
 		goto div;
 
-	gotweb_render_navs(c);
+	error = gotweb_render_navs(c);
+	if (error)
+		goto done;
 div:
 	fcgi_gen_response(c, "</div>\n");
 done:
@@ -1209,7 +1240,13 @@ static const struct got_error *
 gotweb_render_briefs(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct repo_commit *rc = NULL, *trc = NULL;
+	struct server *srv = c->srv;
 	struct transport *t = c->t;
+	struct querystring *qs = t->qs;
+	struct repo_dir *repo_dir = t->repo_dir;
+	char *smallerthan, *newline;
+	char *age = NULL;
 
 	if (fcgi_gen_response(c, "<div id='briefs_title_wrapper'>\n") == -1)
 		goto done;
@@ -1224,55 +1261,121 @@ gotweb_render_briefs(struct request *c)
 	if (fcgi_gen_response(c, "<div id='briefs_wrapper'>\n") == -1)
 		goto done;
 
-
-
-
-
-
-
-
-
-
-
-
-
-	if (fcgi_gen_response(c, "<div id='briefs_age'>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
+	if (qs->action == SUMMARY)
+		error = got_get_repo_commits(c, D_MAXSLCOMMDISP);
+	else
+		error = got_get_repo_commits(c, srv->max_commits_display);
+	if (error)
 		goto done;
 
-	if (fcgi_gen_response(c, "<div id='briefs_author'>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
+	TAILQ_FOREACH_SAFE(rc, &t->repo_commits, entry, trc) {
+		error = gotweb_get_time_str(&age, rc->committer_time, TM_DIFF);
+		if (error)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='briefs_age'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, age ? age : "") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
 
-	if (fcgi_gen_response(c, "<div id='briefs_log'>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
+		if (fcgi_gen_response(c, "<div id='briefs_author'>") == -1)
+			goto done;
+		smallerthan = strchr(rc->author, '<');
+		if (smallerthan)
+			*smallerthan = '\0';
+		if (fcgi_gen_response(c, rc->author) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
 
-	if (fcgi_gen_response(c, "<div id='navs_wrapper'>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "<div id='navs'>") == -1)
-		goto done;
+		if (fcgi_gen_response(c, "<div id='briefs_log'>") == -1)
+			goto done;
+		newline = strchr(rc->commit_msg, '\n');
+		if (newline)
+			*newline = '\0';
+		if (fcgi_gen_response(c, rc->commit_msg) == -1)
+			goto done;
+		if (rc->refs_str) {
+			if (fcgi_gen_response(c,
+			    " <span id='refs_str'>(") == -1)
+				goto done;
+			if (fcgi_gen_response(c, rc->refs_str) == -1)
+				goto done;
+			if (fcgi_gen_response(c, ")</span>") == -1)
+				goto done;
+		}
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
 
-	if (fcgi_gen_response(c, "diff | tree") == -1)
-		goto done;
+		if (fcgi_gen_response(c, "<div id='navs_wrapper'>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='navs'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=diff&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rc->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "diff") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
 
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
+		if (fcgi_gen_response(c, " | ") == -1)
+			goto done;
 
+		if (fcgi_gen_response(c, "<a href='?index_page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->index_page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=tree&commit=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, rc->commit_id) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "tree") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
 
+		free(age);
+		age = NULL;
+		TAILQ_REMOVE(&t->repo_commits, rc, entry);
+		gotweb_free_repo_commit(rc);
+	}
 
-
-
-
-
-
-
-
+	if (t->next_id || qs->page > 0) {
+		error = gotweb_render_navs(c);
+		if (error)
+			goto done;
+	}
 
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
@@ -1300,6 +1403,7 @@ static const struct got_error *
 gotweb_render_summary(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct transport *t = c->t;
 	struct server *srv = c->srv;
 
 	if (fcgi_gen_response(c, "<div id='summary_wrapper'>\n") == -1)
@@ -1313,7 +1417,7 @@ gotweb_render_summary(struct request *c)
 		goto done;
 	if (fcgi_gen_response(c, "<div id='description'>") == -1)
 		goto done;
-	if (fcgi_gen_response(c, c->t->repo_dir->description) == -1)
+	if (fcgi_gen_response(c, t->repo_dir->description) == -1)
 		goto done;
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
@@ -1326,7 +1430,7 @@ owner:
 		goto done;
 	if (fcgi_gen_response(c, "<div id='repo_owner'>") == -1)
 		goto done;
-	if (fcgi_gen_response(c, c->t->repo_dir->owner) == -1)
+	if (fcgi_gen_response(c, t->repo_dir->owner) == -1)
 		goto done;
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
@@ -1339,7 +1443,7 @@ last_change:
 		goto done;
 	if (fcgi_gen_response(c, "<div id='last_change'>") == -1)
 		goto done;
-	if (fcgi_gen_response(c, c->t->repo_dir->age) == -1)
+	if (fcgi_gen_response(c, t->repo_dir->age) == -1)
 		goto done;
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
@@ -1352,7 +1456,7 @@ clone_url:
 		goto done;
 	if (fcgi_gen_response(c, "<div id='cloneurl'>") == -1)
 		goto done;
-	if (fcgi_gen_response(c, c->t->repo_dir->url) == -1)
+	if (fcgi_gen_response(c, t->repo_dir->url) == -1)
 		goto done;
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
