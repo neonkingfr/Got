@@ -117,12 +117,12 @@ struct server *gotweb_get_server(uint8_t *, uint8_t *);
 void
 gotweb_process_request(struct request *c)
 {
-	const struct got_error *error = NULL;
+	const struct got_error *error = NULL, *error2 = NULL;
 	struct server *srv = NULL;
 	struct querystring *qs = NULL;
 	struct repo_dir *repo_dir = NULL;
 	uint8_t err[] = "gotwebd experienced an error: ";
-	int h_s = 0;
+	int html = 0;
 
 	/* init the transport */
 	error = gotweb_init_transport(&c->t);
@@ -154,20 +154,6 @@ gotweb_process_request(struct request *c)
 		goto err;
 	}
 
-	if (qs->action != INDEX) {
-		error = gotweb_init_repo_dir(&repo_dir, qs->path);
-		if (error)
-			goto done;
-		error = gotweb_load_got_path(c, repo_dir);
-		c->t->repo_dir = repo_dir;
-		if (error)
-			goto done;
-		if (error && error->code == GOT_ERR_NOT_GIT_REPO)
-			error = NULL;
-		else if (error)
-			goto done;
-	}
-
 	/* render top of page */
 	if (qs != NULL && qs->action == BLOB) {
 		error = gotweb_render_content_type(c, "text/text");
@@ -188,7 +174,19 @@ gotweb_process_request(struct request *c)
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
-		h_s = 1;
+		html = 1;
+	}
+
+	if (qs->action != INDEX) {
+		error = gotweb_init_repo_dir(&repo_dir, qs->path);
+		if (error)
+			goto done;
+		error = gotweb_load_got_path(c, repo_dir);
+		c->t->repo_dir = repo_dir;
+		if (error && error->code == GOT_ERR_NOT_GIT_REPO)
+			error = NULL;
+		else if (error && error->code != GOT_ERR_LONELY_PACKIDX)
+			goto err;
 	}
 
 	error = gotweb_render_header(c);
@@ -281,12 +279,12 @@ gotweb_process_request(struct request *c)
 
 	goto done;
 err:
-	if (h_s == 0) {
-		error = gotweb_render_content_type(c, "text/text");
-		if (error)
+	if (html == 0) {
+		error2 = gotweb_render_content_type(c, "text/text");
+		if (error2)
 			return;
 	}
-	if (fcgi_gen_response(c, "<div id='err_content'>\n") == -1)
+	if (html && fcgi_gen_response(c, "<div id='err_content'>\n") == -1)
 		return;
 	if (fcgi_gen_response(c, err) == -1)
 		return;
@@ -297,12 +295,12 @@ err:
 		if (fcgi_gen_response(c, "see daemon logs for details") == -1)
 			return;
 	}
-	if (fcgi_gen_response(c, "</div>\n") == -1)
+	if (html && fcgi_gen_response(c, "</div>\n") == -1)
 		return;
 done:
 	if (qs->action != INDEX)
 		got_repo_close(c->t->repo);
-	if (srv != NULL)
+	if (html && srv != NULL)
 		gotweb_render_footer(c);
 }
 
@@ -983,7 +981,7 @@ gotweb_render_index(struct request *c)
 			error = NULL;
 			continue;
 		}
-		else if (error)
+		else if (error && error->code != GOT_ERR_LONELY_PACKIDX)
 			goto done;
 
 		if (lstat(repo_dir->path, &st) == 0 &&
