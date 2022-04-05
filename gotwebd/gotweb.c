@@ -154,22 +154,40 @@ gotweb_process_request(struct request *c)
 
 	/* render top of page */
 	if (c->t->qs != NULL && c->t->qs->action == BLOB) {
-		gotweb_render_content_type(c, "text/text");
+		error = gotweb_render_content_type(c, "text/text");
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
 		/* got_render_blob; */
 		if (fcgi_gen_response(c, "render blob here") == -1)
 			return;
-	} else
-		gotweb_render_content_type(c, "text/html");
+	} else {
+		error = gotweb_render_content_type(c, "text/html");
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+	}
 
-	gotweb_render_header(c, srv);
+	error = gotweb_render_header(c, srv);
+	if (error) {
+		log_warnx("%s: %s", __func__, error->msg);
+		goto err;
+	}
 
 	if (c->t->qs->action != INDEX) {
 		switch(c->t->qs->action) {
 		default:
 			break;
 		}
-	} else
-		gotweb_render_index(c, srv);
+	} else {
+		error = gotweb_render_index(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+	}
 
 	goto done;
 err:
@@ -179,7 +197,9 @@ err:
 	 * than the text error?
 	 */
 	erre = 1;
-	gotweb_render_content_type(c, "text/text");
+	error = gotweb_render_content_type(c, "text/text");
+	if (error)
+		return;
 	if (fcgi_gen_response(c, err) == -1)
 		return;
 	if (error) {
@@ -537,8 +557,8 @@ gotweb_render_header(struct request *c, struct server *srv)
 	    "<link rel='icon' type='image/png' sizes='32x32' "
 	    "href='/favicon-32x32.png'/>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "<link rel='icon' type='image/png' sizes='16x16' "
-	    "href='/favicon-16x16.png'/>\n") == -1)
+	if (fcgi_gen_response(c, "<link rel='icon' type='image/png' "
+	    "sizes='16x16' href='/favicon-16x16.png'/>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c, "<link rel='manifest' "
 	    "href='/site.webmanifest'/>\n") == -1)
@@ -613,8 +633,7 @@ gotweb_render_header(struct request *c, struct server *srv)
 		}
 
 	}
-	if (fcgi_gen_response(c, "</div>\n</div>\n<div id='content'>\n") == -1)
-		goto done;
+	fcgi_gen_response(c, "</div>\n</div>\n<div id='content'>\n");
 done:
 	free(title);
 	free(droot);
@@ -645,8 +664,7 @@ gotweb_render_footer(struct request *c, struct server *srv)
 	} else
 		if (fcgi_gen_response(c, "&nbsp;") == -1)
 			goto done;
-	if (fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>") == -1)
-		goto done;
+	fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>");
 done:
 	free(siteowner);
 
@@ -698,8 +716,7 @@ gotweb_render_navs(struct request *c, struct server *srv)
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
 
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
+	fcgi_gen_response(c, "</div>\n");
 done:
 	free(ppage);
 	free(npage);
@@ -1034,7 +1051,7 @@ gotweb_load_got_path(struct server *srv, struct repo_dir *repo_dir)
 		if (repo_dir->path == NULL) {
 			opened = 1;
 			error = got_error_from_errno("strdup");
-			goto errored;
+			goto err;
 		}
 		opened = 1;
 		goto done;
@@ -1044,7 +1061,7 @@ gotweb_load_got_path(struct server *srv, struct repo_dir *repo_dir)
 	    GOTWEB_GOT_DIR) == -1) {
 		dir_test = NULL;
 		error = got_error_from_errno("asprintf");
-		goto errored;
+		goto err;
 	}
 
 	dt = opendir(dir_test);
@@ -1053,42 +1070,43 @@ gotweb_load_got_path(struct server *srv, struct repo_dir *repo_dir)
 	else {
 		opened = 1;
 		error = got_error(GOT_ERR_NOT_GIT_REPO);
-		goto errored;
+		goto err;
 	}
 
-	if (asprintf(&dir_test, "%s/%s", srv->repos_path, repo_dir->name) == -1) {
+	if (asprintf(&dir_test, "%s/%s", srv->repos_path,
+	    repo_dir->name) == -1) {
 		error = got_error_from_errno("asprintf");
 		dir_test = NULL;
-		goto errored;
+		goto err;
 	}
 
 	repo_dir->path = strdup(dir_test);
 	if (repo_dir->path == NULL) {
 		opened = 1;
 		error = got_error_from_errno("strdup");
-		goto errored;
+		goto err;
 	}
 
 	dt = opendir(dir_test);
 	if (dt == NULL) {
 		error = got_error_path(repo_dir->name, GOT_ERR_NOT_GIT_REPO);
-		goto errored;
+		goto err;
 	} else
 		opened = 1;
 done:
 	error = gotweb_get_repo_description(&repo_dir->description, srv,
 	    repo_dir->path);
 	if (error)
-		goto errored;
+		goto err;
 	error = got_get_repo_owner(&repo_dir->owner, srv, repo_dir->path);
 	if (error)
-		goto errored;
+		goto err;
 	error = got_get_repo_age(&repo_dir->age, srv, repo_dir->path,
 	    NULL, TM_DIFF);
 	if (error)
-		goto errored;
+		goto err;
 	error = gotweb_get_clone_url(&repo_dir->url, srv, repo_dir->path);
-errored:
+err:
 	free(dir_test);
 	if (opened)
 		if (dt != NULL && closedir(dt) == EOF && error == NULL)
