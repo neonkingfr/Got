@@ -105,7 +105,7 @@ static const struct got_error *gotweb_render_branches(struct request *);
 static void gotweb_free_querystring(struct querystring *);
 static void gotweb_free_repo_dir(struct repo_dir *);
 
-struct server *gotweb_get_server(uint8_t *, uint8_t *);
+struct server *gotweb_get_server(uint8_t *, uint8_t *, uint8_t *);
 
 void
 gotweb_process_request(struct request *c)
@@ -127,7 +127,7 @@ gotweb_process_request(struct request *c)
 	if (c->sock->client_status == CLIENT_DISCONNECT)
 		return;
 	/* get the gotwebd server */
-	srv = gotweb_get_server(c->document_root, c->http_host);
+	srv = gotweb_get_server(c->server_name, c->document_root, c->http_host);
 	if (srv == NULL) {
 		log_warnx("%s: error server is NULL", __func__);
 		goto err;
@@ -286,17 +286,24 @@ done:
 }
 
 struct server *
-gotweb_get_server(uint8_t *document_root, uint8_t *subdomain)
+gotweb_get_server(uint8_t *server_name, uint8_t *document_root,
+    uint8_t *subdomain)
 {
 	struct server *srv = NULL;
 
 	/* check against document_root first */
+	if (strlen(server_name) > 0)
+		TAILQ_FOREACH(srv, gotwebd_env->servers, entry)
+			if (strcmp(srv->name, server_name) == 0)
+				goto done;
+
+	/* check against document_root second */
 	if (strlen(document_root) > 0)
 		TAILQ_FOREACH(srv, gotwebd_env->servers, entry)
 			if (strcmp(srv->name, document_root) == 0)
 				goto done;
 
-	/* check against subdomain next */
+	/* check against subdomain third */
 	if (strlen(subdomain) > 0)
 		TAILQ_FOREACH(srv, gotwebd_env->servers, entry)
 			if (strcmp(srv->name, subdomain) == 0)
@@ -306,7 +313,7 @@ gotweb_get_server(uint8_t *document_root, uint8_t *subdomain)
 	TAILQ_FOREACH(srv, gotwebd_env->servers, entry)
 		if (srv != NULL)
 			break;
-
+log_info("%s:%s:%s", server_name, document_root, subdomain);
 done:
 	return srv;
 };

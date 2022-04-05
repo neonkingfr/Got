@@ -49,6 +49,7 @@
 /* GOTWEB DEFAULTS */
 #define MAX_QUERYSTRING		 2048
 #define MAX_DOCUMENT_ROOT	 255
+#define MAX_SERVER_NAME		 255
 
 #define GOTWEB_GOT_DIR		 ".got"
 #define GOTWEB_GIT_DIR		 ".git"
@@ -203,6 +204,7 @@ struct request {
 	char				 querystring[MAX_QUERYSTRING];
 	char				 http_host[GOTWEBD_MAXTEXT];
 	char				 document_root[MAX_DOCUMENT_ROOT];
+	char				 server_name[MAX_SERVER_NAME];
 
 	struct env_head			 env;
 	int				 env_count;

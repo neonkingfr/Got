@@ -275,6 +275,13 @@ fcgi_parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 			bcopy(dr_buf, c->document_root, val_len - 1);
 			c->document_root[val_len] = '\0';
 		}
+		if (val_len < MAX_SERVER_NAME && strcmp(env_entry->val,
+		    "SERVER_NAME") == 0 && c->server_name[0] == '\0') {
+			/* drop first char, as it's always / */
+
+			bcopy(buf, c->server_name, val_len);
+			c->server_name[val_len] = '\0';
+		}
 		env_entry->val[name_len] = '=';
 
 		bcopy(buf, (env_entry->val) + name_len + 1, val_len);
