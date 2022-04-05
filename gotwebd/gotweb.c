@@ -249,7 +249,7 @@ gotweb_process_request(struct request *c)
 		break;
 	case ERR:
 	default:
-		if (fcgi_gen_response(c, "<div id='err_content'>\n") == -1)
+		if (fcgi_gen_response(c, "<div id='err_content'>") == -1)
 			goto err;
 		if (fcgi_gen_response(c, "Error: Bad Querystring\n") == -1)
 			goto err;
@@ -265,7 +265,7 @@ err:
 		if (error2)
 			return;
 	}
-	if (html && fcgi_gen_response(c, "<div id='err_content'>\n") == -1)
+	if (html && fcgi_gen_response(c, "<div id='err_content'>") == -1)
 		return;
 	if (fcgi_gen_response(c, err) == -1)
 		return;
@@ -1319,6 +1319,7 @@ gotweb_render_blame(struct request *c)
 
 	fcgi_gen_response(c, "</div>\n");
 done:
+	fcgi_gen_response(c, "</div>\n");
 	return error;
 }
 
@@ -2037,10 +2038,9 @@ gotweb_render_diff(struct request *c)
 	if (error)
 		goto done;
 
-	if (fcgi_gen_response(c, "</div>\n") == -1)
-		goto done;
 	fcgi_gen_response(c, "</div>\n");
 done:
+	fcgi_gen_response(c, "</div>\n");
 	free(age);
 	free(author);
 	return error;

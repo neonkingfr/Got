@@ -1506,12 +1506,6 @@ got_output_file_blame(struct request *c)
 	    NULL, NULL);
 
 	error = got_gotweb_flushtemp(bca.f, fd);
-done:
-	free(in_repo_path);
-	free(commit_id);
-	free(obj_id);
-	free(path);
-
 	if (blob) {
 		free(bca.line_offsets);
 		for (i = 0; i < bca.nlines; i++) {
@@ -1521,6 +1515,12 @@ done:
 		}
 		free(bca.lines);
 	}
+done:
+	free(in_repo_path);
+	free(commit_id);
+	free(obj_id);
+	free(path);
+
 	if (blob)
 		got_object_blob_close(blob);
 	return error;
