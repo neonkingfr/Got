@@ -281,17 +281,13 @@ gotweb_process_request(struct request *c)
 
 	goto done;
 err:
-	/*
-	 * we don't care if errors are pretty at this point
-	 * for example, if srv == NULL, how can we render anything other
-	 * than the text error?
-	 */
-	erre = 1;
 	if (h_s == 0) {
 		error = gotweb_render_content_type(c, "text/text");
 		if (error)
 			return;
 	}
+	if (fcgi_gen_response(c, "<div id='err_content'>\n") == -1)
+		return;
 	if (fcgi_gen_response(c, err) == -1)
 		return;
 	if (error) {
@@ -301,10 +297,12 @@ err:
 		if (fcgi_gen_response(c, "see daemon logs for details") == -1)
 			return;
 	}
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		return;
 done:
 	if (qs->action != INDEX)
 		got_repo_close(c->t->repo);
-	if (srv != NULL && erre == 0)
+	if (srv != NULL)
 		gotweb_render_footer(c);
 }
 

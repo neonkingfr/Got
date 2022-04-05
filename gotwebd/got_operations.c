@@ -488,9 +488,10 @@ got_get_repo_commits(struct request *c, int limit)
 				break;
 			chk_next = 1;
 		}
-		if (commit != NULL)
+		if (commit != NULL) {
 			got_object_commit_close(commit);
-
+			commit = NULL;
+		}
 	}
 done:
 	/*
