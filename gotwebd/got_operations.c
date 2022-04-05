@@ -363,7 +363,8 @@ got_get_repo_commits(struct request *c, int limit)
 	 * looking at old commits. Some kind of better caching must be
 	 * investigated. This is only relevant to commits/briefs.
 	 */
-	if (qs->action == BRIEFS || qs->action == COMMITS) {
+	if (qs->action == BRIEFS || qs->action == COMMITS ||
+	    (qs->action == TREE && qs->commit == NULL)) {
 		error = got_ref_open(&ref, repo, qs->headref, 0);
 		if (error)
 			goto err;
