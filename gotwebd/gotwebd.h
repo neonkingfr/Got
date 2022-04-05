@@ -149,6 +149,7 @@ struct repo_tag {
 	char			*commit_id;
 	char			*tag_name;
 	char			*tag_commit;
+	char			*commit_msg;
 	char			*tagger;
 	time_t			 tagger_time;
 };

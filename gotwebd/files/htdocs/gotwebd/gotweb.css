@@ -15,6 +15,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* XXX: this needs a serious audit at the end of gotwebd */
+
 /* general sections */
 
 a {
@@ -542,10 +544,11 @@ body {
 #tag_info_tagger {
 	float: left;
 }
-#tag_info {
+#tag_commit {
 	clear: left;
 	float: left;
-	margin-top: 25px;
+	padding-left: 20px;
+	padding-bottom: 20px;
 	white-space: pre-wrap;
 }
 

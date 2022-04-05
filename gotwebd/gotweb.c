@@ -515,6 +515,7 @@ void
 gotweb_free_repo_tag(struct repo_tag *rt)
 {
 	if (rt != NULL) {
+		free(rt->commit_msg);
 		free(rt->commit_id);
 		free(rt->tagger);
 	}
@@ -1779,7 +1780,6 @@ content:
 		log_warnx("%s: %s", __func__, error->msg);
 		goto done;
 	}
-
 done:
 	return error;
 }
@@ -1830,6 +1830,17 @@ gotweb_render_tag(struct request *c)
 		goto done;
 	if (fcgi_gen_response(c, rt->commit_id) == -1)
 		goto done;
+
+	if (strncmp(rt->tag_name, "refs/", 5) == 0)
+		rt->tag_name += 5;
+
+	if (fcgi_gen_response(c, " <span id='refs_str'>(") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rt->tag_name) == -1)
+		goto done;
+	if (fcgi_gen_response(c, ")</span>") == -1)
+		goto done;
+
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
 
@@ -1858,9 +1869,7 @@ gotweb_render_tag(struct request *c)
 		goto done;
 	if (fcgi_gen_response(c, "<div id='header_commit_msg'>") == -1)
 		goto done;
-	if (fcgi_gen_response(c, rt->tag_name) == -1)
-		goto done;
-	if (fcgi_gen_response(c, "</div>\n") == -1)
+	if (fcgi_gen_response(c, rt->commit_msg) == -1)
 		goto done;
 	if (fcgi_gen_response(c, "</div>\n") == -1)
 		goto done;
@@ -1869,10 +1878,10 @@ gotweb_render_tag(struct request *c)
 
 	if (fcgi_gen_response(c, "<div id='dotted_line'></div>\n") == -1)
 		goto done;
-	if (fcgi_gen_response(c, "<div id='diff'>\n") == -1)
+	if (fcgi_gen_response(c, "<div id='tag_commit'>\n") == -1)
 		goto done;
 
-	if (error)
+	if (fcgi_gen_response(c, rt->tag_commit) == -1)
 		goto done;
 
 	if (fcgi_gen_response(c, "</div>\n") == -1)
@@ -1939,6 +1948,8 @@ gotweb_render_tags(struct request *c)
 
 		if (fcgi_gen_response(c, "<div id='tag'>") == -1)
 			goto done;
+		if (strncmp(rt->tag_name, "refs/tags/", 10) == 0)
+			rt->tag_name += 10;
 		if (fcgi_gen_response(c, rt->tag_name) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "</div>\n") == -1)
