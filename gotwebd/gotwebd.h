@@ -358,47 +358,46 @@ extern struct gotwebd	*gotwebd_env;
 void	 socket_rlimit(int);
 
 /* sockets.c */
-void	 sockets(struct privsep *, struct privsep_proc *);
-void	 sockets_shutdown(void);
-void	 sockets_purge(struct gotwebd *);
-void	 sockets_parse_sockets(struct gotwebd *);
-void	 sockets_socket_accept(int, short, void *);
-int	 sockets_privinit(struct gotwebd *, struct socket *);
+void sockets(struct privsep *, struct privsep_proc *);
+void sockets_shutdown(void);
+void sockets_purge(struct gotwebd *);
+void sockets_parse_sockets(struct gotwebd *);
+void sockets_socket_accept(int, short, void *);
+int sockets_privinit(struct gotwebd *, struct socket *);
 
 /* gotweb.c */
-void	 gotweb_process_request(struct request *);
-void	 gotweb_free_transport(struct transport *);
-const struct got_error	*gotweb_get_time_str(char **, time_t, int);
-const struct got_error	*gotweb_init_transport(struct transport **);
+void gotweb_process_request(struct request *);
+void gotweb_free_transport(struct transport *);
+const struct got_error *gotweb_get_time_str(char **, time_t, int);
+const struct got_error *gotweb_init_transport(struct transport **);
 
 /* parse.y */
-int	 parse_config(const char *, struct gotwebd *);
-int	 cmdline_symset(char *);
+int parse_config(const char *, struct gotwebd *);
+int cmdline_symset(char *);
 
 /* fcgi.c */
-void	 fcgi_request(int, short, void *);
-void	 fcgi_timeout(int, short, void *);
-void	 fcgi_cleanup_request(struct request *);
-void	 fcgi_create_end_record(struct request *);
-void	 dump_fcgi_record(const char *, struct fcgi_record_header *);
-int	 fcgi_gen_response(struct request *, char *);
+void fcgi_request(int, short, void *);
+void fcgi_timeout(int, short, void *);
+void fcgi_cleanup_request(struct request *);
+void fcgi_create_end_record(struct request *);
+void dump_fcgi_record(const char *, struct fcgi_record_header *);
+int fcgi_gen_response(struct request *, char *);
 
 /* got_operations.c */
-const struct got_error	*got_tests(struct querystring *);
-const struct got_error	*got_get_repo_owner(char **, struct server *, char *);
-const struct got_error	*got_get_repo_age(char **, struct server *, char *,
+const struct got_error *got_tests(struct querystring *);
+const struct got_error *got_get_repo_owner(char **, struct server *, char *);
+const struct got_error *got_get_repo_age(char **, struct server *, char *,
     const char *, int);
 
 /* config.c */
-int	 config_setserver(struct gotwebd *, struct server *);
-int	 config_getserver(struct gotwebd *, struct imsg *);
-int	 config_setsock(struct gotwebd *, struct socket *);
-int	 config_getsock(struct gotwebd *, struct imsg *);
-int	 config_setfd(struct gotwebd *, struct priv_fd *);
-int	 config_getfd(struct gotwebd *, struct imsg *);
-int	 config_getcfg(struct gotwebd *, struct imsg *);
-int	 config_init(struct gotwebd *);
-int	 config_setreset(struct gotwebd *, unsigned int);
-int	 config_getreset(struct gotwebd *, struct imsg *);
-
-void	 config_purge(struct gotwebd *, unsigned int);
+int config_setserver(struct gotwebd *, struct server *);
+int config_getserver(struct gotwebd *, struct imsg *);
+int config_setsock(struct gotwebd *, struct socket *);
+int config_getsock(struct gotwebd *, struct imsg *);
+int config_setfd(struct gotwebd *, struct priv_fd *);
+int config_getfd(struct gotwebd *, struct imsg *);
+int config_getcfg(struct gotwebd *, struct imsg *);
+int config_init(struct gotwebd *);
+int config_setreset(struct gotwebd *, unsigned int);
+int config_getreset(struct gotwebd *, struct imsg *);
+void config_purge(struct gotwebd *, unsigned int);
