@@ -47,6 +47,18 @@ static const struct got_error *got_get_repo_commit(struct request *,
 static const struct got_error *got_gotweb_opentemp(FILE **, int *, int *);
 static const struct got_error *got_gotweb_flushtemp(FILE *, int);
 
+static int
+isbinary(const uint8_t *buf, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++)
+		if (buf[i] == 0)
+			return 1;
+	return 0;
+}
+
+
 static const struct got_error *
 got_gotweb_flushtemp(FILE *f, int fd)
 {
@@ -848,6 +860,7 @@ got_output_repo_tree(struct request *c)
 			if (fcgi_gen_response(c,
 			    "<div id='tree_wrapper'>\n") == -1)
 			goto done;
+
 			if (fcgi_gen_response(c, "<div id='tree_line' "
 			    "class='") == -1)
 				goto done;
@@ -859,36 +872,29 @@ got_output_repo_tree(struct request *c)
 			if (fcgi_gen_response(c, "<a class='diff_directory' "
 			    "href='?index_page=") == -1)
 				goto done;
-
 			if (fcgi_gen_response(c, qs->index_page_str) == -1)
 				goto done;
-
 			if (fcgi_gen_response(c, "&path=") == -1)
 				goto done;
 			if (fcgi_gen_response(c, qs->path) == -1)
 				goto done;
-
 			if (fcgi_gen_response(c, "&action=tree") == -1)
 				goto done;
-
 			if (fcgi_gen_response(c, "&commit=") == -1)
 				goto done;
 			if (fcgi_gen_response(c, qs->commit) == -1)
 				goto done;
-
 			if (fcgi_gen_response(c, "&folder=") == -1)
 				goto done;
 			if (fcgi_gen_response(c, build_folder) == -1)
 				goto done;
-
 			if (fcgi_gen_response(c, "'>") == -1)
 				goto done;
 			if (fcgi_gen_response(c, name) == -1)
 				goto done;
 			if (fcgi_gen_response(c, modestr) == -1)
 				goto done;
-
-			if (fcgi_gen_response(c, "</a>\n") == -1)
+			if (fcgi_gen_response(c, "</a>") == -1)
 				goto done;
 
 			if (fcgi_gen_response(c, "</div>\n") == -1)
@@ -905,8 +911,10 @@ got_output_repo_tree(struct request *c)
 				goto done;
 			if (fcgi_gen_response(c, "</div>\n") == -1)
 				goto done;
+
 			if (fcgi_gen_response(c, "</div>\n") == -1)
 				goto done;
+
 		} else {
 			name = strdup(got_tree_entry_get_name(te));
 
@@ -958,17 +966,18 @@ got_output_repo_tree(struct request *c)
 			if (fcgi_gen_response(c, modestr) == -1)
 				goto done;
 
-			if (fcgi_gen_response(c, "</a>\n") == -1)
+			if (fcgi_gen_response(c, "</a>") == -1)
 				goto done;
+
 			if (fcgi_gen_response(c, "</div>\n") == -1)
 				goto done;
 
-			if (fcgi_gen_response(c, "<div class='") == -1)
+			if (fcgi_gen_response(c, "<div id='tree_line_blank' "
+			    "class='") == -1)
 				goto done;
 			if (fcgi_gen_response(c, class) == -1)
 				goto done;
-			if (fcgi_gen_response(c,
-			    " id='tree_line_navs'>\n") == -1)
+			if (fcgi_gen_response(c, "'>") == -1)
 				goto done;
 
 			if (fcgi_gen_response(c,
@@ -1068,6 +1077,13 @@ done:
 	free(label2);
 	free(id1);
 	free(id2);
+	return error;
+}
+
+const struct got_error *
+got_output_repo_blob(struct request *c)
+{
+	const struct got_error *error = NULL;
 	return error;
 }
 

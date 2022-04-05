@@ -95,7 +95,6 @@ static const struct got_error *gotweb_get_clone_url(char **, struct server *,
     char *);
 static const struct got_error *gotweb_render_navs(struct request *);
 static const struct got_error *gotweb_render_blame(struct request *);
-static const struct got_error *gotweb_render_blob(struct request *);
 static const struct got_error *gotweb_render_briefs(struct request *);
 static const struct got_error *gotweb_render_commits(struct request *);
 static const struct got_error *gotweb_render_diff(struct request *);
@@ -150,6 +149,16 @@ gotweb_process_request(struct request *c)
 		goto err;
 	}
 
+	if (qs->action != INDEX) {
+		error = gotweb_init_repo_dir(&repo_dir, qs->path);
+		if (error)
+			goto done;
+		error = gotweb_load_got_path(c, repo_dir);
+		c->t->repo_dir = repo_dir;
+		if (error && error->code != GOT_ERR_LONELY_PACKIDX)
+			goto err;
+	}
+
 	/* render top of page */
 	if (qs != NULL && qs->action == BLOB) {
 		error = gotweb_render_content_type(c, "text/text");
@@ -157,12 +166,12 @@ gotweb_process_request(struct request *c)
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
-		error = gotweb_render_blob(c);
+		error = got_output_repo_blob(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
-		return;
+		goto done;
 	} else {
 		error = gotweb_render_content_type(c, "text/html");
 		if (error) {
@@ -178,26 +187,9 @@ gotweb_process_request(struct request *c)
 		goto err;
 	}
 
-	if (qs->action != INDEX) {
-		error = gotweb_init_repo_dir(&repo_dir, qs->path);
-		if (error)
-			goto done;
-		error = gotweb_load_got_path(c, repo_dir);
-		c->t->repo_dir = repo_dir;
-		if (error && error->code != GOT_ERR_LONELY_PACKIDX)
-			goto err;
-	}
-
 	switch(qs->action) {
 	case BLAME:
 		error = gotweb_render_blame(c);
-		if (error) {
-			log_warnx("%s: %s", __func__, error->msg);
-			goto err;
-		}
-		break;
-	case BLOB:
-		error = gotweb_render_blob(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
@@ -1250,24 +1242,6 @@ gotweb_render_blame(struct request *c)
 }
 
 static const struct got_error *
-gotweb_render_blob(struct request *c)
-{
-	const struct got_error *error = NULL;
-
-
-
-
-
-
-
-
-
-
-
-	return error;
-}
-
-static const struct got_error *
 gotweb_render_briefs(struct request *c)
 {
 	const struct got_error *error = NULL;
@@ -1801,6 +1775,7 @@ gotweb_render_tree(struct request *c)
 
 	if (fcgi_gen_response(c, "<div id='tree_content'>\n") == -1)
 		goto done;
+
 	if (fcgi_gen_response(c, "<div id='tree_header_wrapper'>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c, "<div id='tree_header'>\n") == -1)
@@ -1850,6 +1825,7 @@ gotweb_render_tree(struct request *c)
 	if (error)
 		goto done;
 
+	fcgi_gen_response(c, "</div>\n");
 	fcgi_gen_response(c, "</div>\n");
 done:
 	return error;
