@@ -35,7 +35,6 @@
 #include "got_commit_graph.h"
 #include "got_blame.h"
 #include "got_privsep.h"
-#include "got_opentemp.h"
 
 #include "proc.h"
 #include "gotwebd.h"
@@ -44,6 +43,45 @@ static const struct got_error *got_init_repo_commit(struct repo_commit **);
 static const struct got_error *got_get_repo_commit(struct request *,
     struct repo_commit *, struct got_commit_object *, struct got_reflist_head *,
     struct got_object_id *);
+static const struct got_error *got_gotweb_opentemp(FILE **, int *, int *);
+static const struct got_error *got_gotweb_flushtemp(FILE *, int);
+
+static const struct got_error *
+got_gotweb_flushtemp(FILE *f, int fd)
+{
+	if (fseek(f, 0, SEEK_SET) == -1)
+		return got_error_from_errno("fseek");
+
+	if (ftruncate(fd, 0) == -1)
+		return got_error_from_errno("ftruncate");
+
+	if (f && fclose(f) == EOF)
+		return got_error_from_errno("fclose");
+
+	if (fd != -1 && close(fd) != -1)
+		return got_error_from_errno("close");
+
+	return NULL;
+}
+
+static const struct got_error *
+got_gotweb_opentemp(FILE **f, int *priv_fd, int *fd)
+{
+	const struct got_error *error = NULL;
+
+	*fd = dup(*priv_fd);
+
+	if (*fd < 0)
+		return NULL;
+
+	*f = fdopen(*fd, "w+");
+	if (*f == NULL) {
+		close(*fd);
+		error = got_error(GOT_ERR_PRIVSEP_NO_FD);
+	}
+
+	return error;
+}
 
 const struct got_error *
 got_tests(struct querystring *qs)
@@ -56,10 +94,12 @@ got_tests(struct querystring *qs)
 }
 
 const struct got_error *
-got_get_repo_owner(char **owner, struct server *srv, char *dir)
+got_get_repo_owner(char **owner, struct request *c, char *dir)
 {
 	const struct got_error *error = NULL;
-	struct got_repository *repo;
+	struct server *srv = c->srv;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
 	const char *gitconfig_owner;
 
 	*owner = NULL;
@@ -67,25 +107,23 @@ got_get_repo_owner(char **owner, struct server *srv, char *dir)
 	if (srv->show_repo_owner == 0)
 		return NULL;
 
-	error = got_repo_open(&repo, dir, NULL);
-	if (error)
-		return error;
 	gitconfig_owner = got_repo_get_gitconfig_owner(repo);
 	if (gitconfig_owner) {
 		*owner = strdup(gitconfig_owner);
 		if (*owner == NULL)
 			return got_error_from_errno("strdup");
 	}
-	error = got_repo_close(repo);
 	return error;
 }
 
 const struct got_error *
-got_get_repo_age(char **repo_age, struct server *srv, char *dir,
+got_get_repo_age(char **repo_age, struct request *c, char *dir,
     const char *refname, int ref_tm)
 {
 	const struct got_error *error = NULL;
-	struct got_repository *repo = NULL;
+	struct server *srv = c->srv;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
 	struct got_commit_object *commit = NULL;
 	struct got_reflist_head refs;
 	struct got_reflist_entry *re;
@@ -96,10 +134,6 @@ got_get_repo_age(char **repo_age, struct server *srv, char *dir,
 
 	if (srv->show_repo_age == 0)
 		return NULL;
-
-	error = got_repo_open(&repo, dir, NULL);
-	if (error)
-		return error;
 
 	error = got_ref_list(&refs, repo, "refs/heads",
 	    got_ref_cmp_by_name, NULL);
@@ -141,7 +175,6 @@ got_get_repo_age(char **repo_age, struct server *srv, char *dir,
 	}
 done:
 	got_ref_list_free(&refs);
-	got_repo_close(repo);
 	return error;
 }
 
@@ -279,7 +312,6 @@ const struct got_error *
 got_get_repo_commits(struct request *c, int limit)
 {
 	const struct got_error *error = NULL;
-	struct got_repository *repo = NULL;
 	struct got_object_id *id = NULL;
 	struct got_commit_graph *graph = NULL;
 	struct got_commit_object *commit = NULL;
@@ -288,6 +320,7 @@ got_get_repo_commits(struct request *c, int limit)
 	struct repo_commit *repo_commit = NULL, *r_s = NULL;
 	struct server *srv = c->srv;
 	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
 	struct querystring *qs = t->qs;
 	struct repo_dir *repo_dir = t->repo_dir;
 	char *in_repo_path = NULL, *repo_path = NULL;
@@ -303,12 +336,6 @@ got_get_repo_commits(struct request *c, int limit)
 	error = got_init_repo_commit(&repo_commit);
 	if (error)
 		return error;
-
-	error = got_repo_open(&repo, repo_path, NULL);
-	if (error)
-		goto err;
-
-	c->t->repo = repo;
 
 	if (qs->commit == NULL || qs->action == COMMITS ||
 	    qs->action == BRIEFS || qs->action == SUMMARY ||
@@ -493,9 +520,140 @@ err:
 	if (graph)
 		got_commit_graph_close(graph);
 	got_ref_list_free(&refs);
-	got_repo_close(repo);
 	free(repo_path);
 	free(id);
+	return error;
+}
+
+const struct got_error *
+got_output_diff(struct request *c)
+{
+	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
+	struct repo_commit *rc = NULL;
+	struct got_object_id *id1 = NULL, *id2 = NULL;
+	struct got_reflist_head refs;
+	FILE *f = NULL;
+	char *label1 = NULL, *label2 = NULL, *line = NULL, *color = NULL;
+	char *newline, *eline = NULL;
+	int obj_type, fd;
+	size_t linesize = 0;
+	ssize_t linelen;
+	int wrlen = 0, wi;
+
+	TAILQ_INIT(&refs);
+
+	error = got_gotweb_opentemp(&f, &c->priv_fd, &fd);
+	if (error)
+		return error;
+
+	rc = TAILQ_FIRST(&t->repo_commits);
+
+	if (rc->parent_id != NULL &&
+	    strncmp(rc->parent_id, "/dev/null", 9) != 0) {
+		error = got_repo_match_object_id(&id1, &label1,
+		    rc->parent_id, GOT_OBJ_TYPE_ANY,
+		    &refs, repo);
+		if (error)
+			goto done;
+	}
+
+	error = got_repo_match_object_id(&id2, &label2, rc->commit_id,
+	    GOT_OBJ_TYPE_ANY, &refs, repo);
+	if (error)
+		goto done;
+
+	error = got_object_get_type(&obj_type, repo, id2);
+	if (error)
+		goto done;
+
+	switch (obj_type) {
+	case GOT_OBJ_TYPE_BLOB:
+		error = got_diff_objects_as_blobs(NULL, NULL, id1, id2,
+		    NULL, NULL, 3, 0, 0, repo, f);
+		break;
+	case GOT_OBJ_TYPE_TREE:
+		error = got_diff_objects_as_trees(NULL, NULL, id1, id2,
+		   "", "", 3, 0, 0, repo, f);
+		break;
+	case GOT_OBJ_TYPE_COMMIT:
+		error = got_diff_objects_as_commits(NULL, NULL, id1, id2,
+		    3, 0, 0, repo, f);
+		break;
+	default:
+		error = got_error(GOT_ERR_OBJ_TYPE);
+	}
+	if (error)
+		goto done;
+
+	if (fseek(f, 0, SEEK_SET) == -1) {
+		error = got_ferror(f, GOT_ERR_IO);
+		goto done;
+	}
+
+	while ((linelen = getline(&line, &linesize, f)) != -1) {
+		color = NULL;
+		if (strncmp(line, "-", 1) == 0)
+			color = "diff_minus";
+		else if (strncmp(line, "+", 1) == 0)
+			color = "diff_plus";
+		else if (strncmp(line, "@@", 2) == 0)
+			color = "diff_chunk_header";
+		else if (strncmp(line, "@@", 2) == 0)
+			color = "diff_chunk_header";
+		else if (strncmp(line, "commit +", 8) == 0)
+			color = "diff_meta";
+		else if (strncmp(line, "commit -", 8) == 0)
+			color = "diff_meta";
+		else if (strncmp(line, "blob +", 6) == 0)
+			color = "diff_meta";
+		else if (strncmp(line, "blob -", 6) == 0)
+			color = "diff_meta";
+		else if (strncmp(line, "file +", 6) == 0)
+			color = "diff_meta";
+		else if (strncmp(line, "file -", 6) == 0)
+			color = "diff_meta";
+		else if (strncmp(line, "from:", 5) == 0)
+			color = "diff_author";
+		else if (strncmp(line, "via:", 4) == 0)
+			color = "diff_author";
+		else if (strncmp(line, "date:", 5) == 0)
+			color = "diff_date";
+		if (fcgi_gen_response(c, "<div id='diff_line' class='") == -1)
+			goto done;
+		if (fcgi_gen_response(c, color ? color : "") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>") == -1)
+			goto done;
+		newline = strchr(line, '\n');
+		if (newline)
+			*newline = '\0';
+
+		error = gotweb_escape_html(&eline, line);
+		if (error)
+			goto done;
+		if (fcgi_gen_response(c, eline) == -1)
+			goto done;
+		free(eline);
+		eline = NULL;
+
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (linelen > 0)
+			wrlen = wrlen + linelen;
+	}
+	if (linelen == -1 && ferror(f))
+		error = got_error_from_errno("getline");
+done:
+	got_ref_list_free(&refs);
+	error = got_gotweb_flushtemp(f, fd);
+	free(line);
+	free(eline);
+	free(label1);
+	free(label2);
+	free(id1);
+	free(id2);
 	return error;
 }
 

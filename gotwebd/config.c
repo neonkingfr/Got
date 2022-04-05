@@ -74,19 +74,6 @@ config_init(struct gotwebd *env)
 	 return 0;
 }
 
-void
-config_purge(struct gotwebd *env, unsigned int reset)
-{
-	struct privsep *ps = env->gotwebd_ps;
-	unsigned int what;
-
-	what = ps->ps_what[privsep_process] & reset;
-
-	if (what & CONFIG_SOCKS) {
-		sockets_purge(env);
-	}
-}
-
 int
 config_getcfg(struct gotwebd *env, struct imsg *imsg)
 {
@@ -329,34 +316,4 @@ config_getfd(struct gotwebd *env, struct imsg *imsg)
 		 return 0;
 	else
 		return 1;
-}
-
-int
-config_setreset(struct gotwebd *env, unsigned int reset)
-{
-	struct privsep *ps = env->gotwebd_ps;
-	unsigned int id;
-
-	for (id = 0; id < PROC_MAX; id++) {
-		if ((reset & ps->ps_what[id]) == 0 ||
-		    id == privsep_process)
-			continue;
-		proc_compose(ps, id, IMSG_CTL_RESET,
-		    &reset, sizeof(reset));
-	}
-
-	 return 0;
-}
-
-int
-config_getreset(struct gotwebd *env, struct imsg *imsg)
-{
-	unsigned int mode;
-
-	IMSG_SIZE_CHECK(imsg, &mode);
-	memcpy(&mode, imsg->data, sizeof(mode));
-
-	config_purge(env, mode);
-
-	 return 0;
 }

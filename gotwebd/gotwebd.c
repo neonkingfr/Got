@@ -20,7 +20,6 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/cdefs.h>
-#include <sys/resource.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -45,8 +44,6 @@
 
 #include "proc.h"
 #include "gotwebd.h"
-
-#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 __dead void usage(void);
 
@@ -319,7 +316,6 @@ gotwebd_configure(struct gotwebd *env)
 		proc_compose(env->gotwebd_ps, id, IMSG_CFG_DONE, NULL, 0);
 	}
 
-	config_purge(env, CONFIG_ALL & ~CONFIG_SOCKS);
 	return (0);
 }
 
@@ -355,25 +351,4 @@ gotwebd_shutdown(void)
 
 	log_warnx("gotwebd terminating");
 	exit(0);
-}
-
-void
-socket_rlimit(int maxfd)
-{
-	struct rlimit rl;
-
-	if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
-		fatal("%s: failed to get resource limit", __func__);
-	log_debug("%s: max open files %llu", __func__, rl.rlim_max);
-
-	/*
-	 * Allow the maximum number of open file descriptors for this
-	 * login class (which should be the class "daemon" by default).
-	 */
-	if (maxfd == -1)
-		rl.rlim_cur = rl.rlim_max;
-	else
-		rl.rlim_cur = MAXIMUM(rl.rlim_max, (rlim_t)maxfd);
-	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
-		fatal("%s: failed to set resource limit", __func__);
 }

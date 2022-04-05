@@ -824,6 +824,10 @@ body {
 	font-family: monospace;
 	white-space: pre;
 }
+#diff_line {
+	clear: left;
+	float: left;
+}
 
 /* summary.tmpl */
 

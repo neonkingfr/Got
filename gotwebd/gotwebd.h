@@ -106,16 +106,7 @@
 #define FCGI_UNKNOWN_ROLE	3
 
 enum imsg_type {
-	IMSG_GET_INFO_GOTWEBD_REQUEST = IMSG_PROC_MAX,
-	IMSG_GET_INFO_GOTWEBD_DATA,
-	IMSG_GET_INFO_GOTWEBD_END_DATA,
-
-	IMSG_GET_INFO_GOTWEB_REQUEST,
-	IMSG_GET_INFO_GOTWEB_REQUEST_ROOT,
-	IMSG_GET_INFO_GOTWEB_DATA,
-	IMSG_GET_INFO_GOTWEB_END_DATA,
-
-	IMSG_CFG_SRV,
+	IMSG_CFG_SRV = IMSG_PROC_MAX,
 	IMSG_CFG_SOCK,
 	IMSG_CFG_FD,
 	IMSG_CFG_DONE,
@@ -386,23 +377,20 @@ enum query_actions {
 
 extern struct gotwebd	*gotwebd_env;
 
-/* gotwebd.c */
-void	 socket_rlimit(int);
-
 /* sockets.c */
 void sockets(struct privsep *, struct privsep_proc *);
 void sockets_shutdown(void);
-void sockets_purge(struct gotwebd *);
 void sockets_parse_sockets(struct gotwebd *);
 void sockets_socket_accept(int, short, void *);
 int sockets_privinit(struct gotwebd *, struct socket *);
 
 /* gotweb.c */
-void gotweb_process_request(struct request *);
-void gotweb_free_transport(struct transport *);
 const struct got_error *gotweb_get_time_str(char **, time_t, int);
 const struct got_error *gotweb_init_transport(struct transport **);
+const struct got_error *gotweb_escape_html(char **, const char *);
 void gotweb_free_repo_commit(struct repo_commit *);
+void gotweb_process_request(struct request *);
+void gotweb_free_transport(struct transport *);
 
 /* parse.y */
 int parse_config(const char *, struct gotwebd *);
@@ -418,10 +406,11 @@ int fcgi_gen_response(struct request *, char *);
 
 /* got_operations.c */
 const struct got_error *got_tests(struct querystring *);
-const struct got_error *got_get_repo_owner(char **, struct server *, char *);
-const struct got_error *got_get_repo_age(char **, struct server *, char *,
+const struct got_error *got_get_repo_owner(char **, struct request *, char *);
+const struct got_error *got_get_repo_age(char **, struct request *, char *,
     const char *, int);
 const struct got_error *got_get_repo_commits(struct request *, int);
+const struct got_error *got_output_diff(struct request *);
 
 /* config.c */
 int config_setserver(struct gotwebd *, struct server *);
@@ -432,6 +421,3 @@ int config_setfd(struct gotwebd *, struct priv_fd *);
 int config_getfd(struct gotwebd *, struct imsg *);
 int config_getcfg(struct gotwebd *, struct imsg *);
 int config_init(struct gotwebd *);
-int config_setreset(struct gotwebd *, unsigned int);
-int config_getreset(struct gotwebd *, struct imsg *);
-void config_purge(struct gotwebd *, unsigned int);

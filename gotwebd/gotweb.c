@@ -42,7 +42,6 @@
 #include "got_commit_graph.h"
 #include "got_blame.h"
 #include "got_privsep.h"
-#include "got_opentemp.h"
 
 #include "proc.h"
 #include "gotwebd.h"
@@ -91,10 +90,9 @@ static const struct got_error *gotweb_render_content_type(struct request *,
 static const struct got_error *gotweb_render_header(struct request *);
 static const struct got_error *gotweb_render_footer(struct request *);
 static const struct got_error *gotweb_render_index(struct request *);
-static const struct got_error *gotweb_escape_html(char **, const char *);
 static const struct got_error *gotweb_init_repo_dir(struct repo_dir **,
     const char *);
-static const struct got_error *gotweb_load_got_path(struct server *srv,
+static const struct got_error *gotweb_load_got_path(struct request *c,
     struct repo_dir *);
 static const struct got_error *gotweb_get_repo_description(char **,
     struct server *, char *);
@@ -115,25 +113,6 @@ static void gotweb_free_querystring(struct querystring *);
 static void gotweb_free_repo_dir(struct repo_dir *);
 
 struct server *gotweb_get_server(uint8_t *, uint8_t *);
-
-FILE *
-gotweb_opentemp(int priv_fd)
-{
-	int fd;
-	FILE *f;
-
-	fd = dup(priv_fd);
-	if (fd < 0)
-		return NULL;
-
-	f = fdopen(fd, "w+");
-	if (f == NULL) {
-		close(fd);
-		return NULL;
-	}
-
-	return f;
-}
 
 void
 gotweb_process_request(struct request *c)
@@ -179,7 +158,7 @@ gotweb_process_request(struct request *c)
 		error = gotweb_init_repo_dir(&repo_dir, qs->path);
 		if (error)
 			goto done;
-		error = gotweb_load_got_path(srv, repo_dir);
+		error = gotweb_load_got_path(c, repo_dir);
 		c->t->repo_dir = repo_dir;
 		if (error)
 			goto done;
@@ -323,6 +302,8 @@ err:
 			return;
 	}
 done:
+	if (qs->action != INDEX)
+		got_repo_close(c->t->repo);
 	if (srv != NULL && erre == 0)
 		gotweb_render_footer(c);
 }
@@ -992,7 +973,7 @@ gotweb_render_index(struct request *c)
 		if (error)
 			goto done;
 
-		error = gotweb_load_got_path(srv, repo_dir);
+		error = gotweb_load_got_path(c, repo_dir);
 		if (error && error->code == GOT_ERR_NOT_GIT_REPO) {
 			error = NULL;
 			continue;
@@ -1157,7 +1138,9 @@ render:
 
 		gotweb_free_repo_dir(repo_dir);
 		repo_dir = NULL;
-
+		error = got_repo_close(t->repo);
+		if (error)
+			goto done;
 		t->next_disp++;
 		if (d_disp == srv->max_repos_display)
 			break;
@@ -1370,6 +1353,133 @@ static const struct got_error *
 gotweb_render_diff(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct repo_commit *rc = NULL;
+	char *age = NULL, *author = NULL;
+
+
+	error = got_get_repo_commits(c, 1);
+	if (error)
+		return error;
+
+	rc = TAILQ_FIRST(&t->repo_commits);
+
+	error = gotweb_get_time_str(&age, rc->committer_time, TM_LONG);
+	if (error)
+		goto done;
+	error = gotweb_escape_html(&author, rc->author);
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='diff_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='diff_title'>Commit Diff</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='diff_content'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='diff_header_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='diff_header'>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_diff_title'>Diff:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_diff'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->parent_id) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<br />") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->commit_id) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_commit_title'>Commit:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_commit'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->commit_id) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_tree_title'>Tree:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_tree'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->tree_id) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_author_title'>Author:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_author'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, author ? author : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_committer_title'>Committer:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_committer'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, author ? author : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_age_title'>Date:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_age'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, age ? age : "") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='header_commit_msg_title'>Message:"
+	    "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='header_commit_msg'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, rc->commit_msg) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='dotted_line'></div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='diff'>\n") == -1)
+		goto done;
+
+	error = got_output_diff(c);
+	if (error)
+		goto done;
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+done:
+	free(age);
+	free(author);
 	return error;
 }
 
@@ -1473,7 +1583,7 @@ gotweb_render_tree(struct request *c)
 	return error;
 }
 
-static const struct got_error *
+const struct got_error *
 gotweb_escape_html(char **escaped_html, const char *orig_html)
 {
 	const struct got_error *error = NULL;
@@ -1538,9 +1648,11 @@ done:
 }
 
 static const struct got_error *
-gotweb_load_got_path(struct server *srv, struct repo_dir *repo_dir)
+gotweb_load_got_path(struct request *c, struct repo_dir *repo_dir)
 {
 	const struct got_error *error = NULL;
+	struct server *srv = c->srv;
+	struct transport *t = c->t;
 	DIR *dt;
 	char *dir_test;
 	int opened = 0;
@@ -1600,14 +1712,17 @@ gotweb_load_got_path(struct server *srv, struct repo_dir *repo_dir)
 	} else
 		opened = 1;
 done:
+	error = got_repo_open(&t->repo, repo_dir->path, NULL);
+	if (error)
+		goto err;
 	error = gotweb_get_repo_description(&repo_dir->description, srv,
 	    repo_dir->path);
 	if (error)
 		goto err;
-	error = got_get_repo_owner(&repo_dir->owner, srv, repo_dir->path);
+	error = got_get_repo_owner(&repo_dir->owner, c, repo_dir->path);
 	if (error)
 		goto err;
-	error = got_get_repo_age(&repo_dir->age, srv, repo_dir->path,
+	error = got_get_repo_age(&repo_dir->age, c, repo_dir->path,
 	    NULL, TM_DIFF);
 	if (error)
 		goto err;

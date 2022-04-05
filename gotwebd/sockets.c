@@ -22,6 +22,7 @@
 #include <sys/queue.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -54,6 +55,8 @@
 #include "gotwebd.h"
 
 #define SOCKS_BACKLOG 5
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
+
 
 volatile int client_cnt;
 
@@ -64,6 +67,8 @@ void	 sockets_run(struct privsep *, struct privsep_proc *, void *);
 void	 sockets_launch(void);
 void	 sockets_accept_paused(int, short, void *);
 void	 sockets_dup_new_socket(struct socket *, struct socket *);
+void	 sockets_rlimit(int);
+
 
 int	 sockets_dispatch_gotwebd(int, struct privsep_proc *, struct imsg *);
 int	 sockets_unix_socket_listen(struct privsep *, struct socket *);
@@ -96,14 +101,15 @@ sockets_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 
 	p->p_shutdown = sockets_shutdown;
 
-	socket_rlimit(-1);
+	sockets_rlimit(-1);
 
 	signal_del(&ps->ps_evsigchld);
 	signal_set(&ps->ps_evsigchld, SIGCHLD, sockets_sighdlr, ps);
 	signal_add(&ps->ps_evsigchld, NULL);
 
 #ifndef PROFILE
-	if (pledge("stdio rpath inet recvfd proc exec sendfd", NULL) == -1)
+	if (pledge("stdio rpath wpath cpath inet recvfd proc exec sendfd",
+	    NULL) == -1)
 		fatal("pledge");
 #endif
 }
@@ -200,7 +206,6 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 
 		TAILQ_INSERT_TAIL(sock->conf.al, acp, entry);
 	}
-
 }
 
 struct socket *
@@ -291,7 +296,6 @@ sockets_conf_new_socket(struct gotwebd *env, struct server *srv, int id,
 
 		TAILQ_INSERT_TAIL(sock->conf.al, acp, entry);
 	}
-
 done:
 	return (sock);
 }
@@ -311,10 +315,10 @@ sockets_socket_af(struct sockaddr_storage *ss, in_port_t port)
 		    sizeof(struct sockaddr_in6);
 		break;
 	default:
-		return (-1);
+		return -1;
 	}
 
-	return (0);
+	return 0;
 }
 
 void
@@ -381,34 +385,26 @@ sockets_dispatch_gotwebd(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_CTL_START:
 		sockets_launch();
 		break;
-	case IMSG_CTL_RESET:
-		config_getreset(gotwebd_env, imsg);
-		break;
 	case IMSG_CTL_VERBOSE:
 		IMSG_SIZE_CHECK(imsg, &verbose);
 		memcpy(&verbose, imsg->data, sizeof(verbose));
 		log_setverbose(verbose);
 		break;
 	default:
-		return (-1);
+		return -1;
 	}
 
 	switch (cmd) {
 	case 0:
 		break;
-	case IMSG_GET_INFO_GOTWEB_END_DATA:
-		if (proc_compose_imsg(ps, PROC_GOTWEBD, -1, cmd,
-		    imsg->hdr.peerid, -1, &mode, sizeof(mode)) == -1)
-			return (-1);
-		break;
 	default:
 		if (proc_compose_imsg(ps, PROC_GOTWEBD, -1, cmd,
 		    imsg->hdr.peerid, -1, &res, sizeof(res)) == -1)
-			return (-1);
+			return -1;
 		break;
 	}
 
-	return (0);
+	return 0;
 }
 
 void
@@ -430,11 +426,6 @@ sockets_sighdlr(int sig, short event, void *arg)
 		log_info("SIGNAL: %d", sig);
 		fatalx("unexpected signal");
 	}
-}
-
-void
-sockets_reset(void)
-{
 }
 
 void
@@ -467,22 +458,6 @@ sockets_shutdown(void)
 	free(gotwebd_env);
 }
 
-void
-sockets_show_info(struct privsep *ps, struct imsg *imsg)
-{
-	char filter[GOTWEBD_MAXNAME];
-
-	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_GOTWEB_REQUEST:
-	case IMSG_GET_INFO_GOTWEB_REQUEST_ROOT:
-		memcpy(filter, imsg->data, sizeof(filter));
-		break;
-	default:
-		log_debug("%s: error handling imsg", __func__);
-		break;
-	}
-}
-
 int
 sockets_privinit(struct gotwebd *env, struct socket *sock)
 {
@@ -494,7 +469,7 @@ sockets_privinit(struct gotwebd *env, struct socket *sock)
 		sock->fd = sockets_unix_socket_listen(ps, sock);
 		if (sock->fd == -1) {
 			log_warnx("%s: create unix socket failed", __func__);
-			return (-1);
+			return -1;
 		}
 	}
 
@@ -505,11 +480,11 @@ sockets_privinit(struct gotwebd *env, struct socket *sock)
 		    sock->conf.fcgi_socket_port);
 		if (sock->fd == -1) {
 			log_warnx("%s: create unix socket failed", __func__);
-			return (-1);
+			return -1;
 		}
 	}
 
-	return (0);
+	return 0;
 }
 
 int
@@ -531,7 +506,7 @@ sockets_unix_socket_listen(struct privsep *ps, struct socket *sock)
 	u_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK| SOCK_CLOEXEC, 0);
 	if (u_fd == -1) {
 		log_warn("%s: socket", __func__);
-		return (-1);
+		return -1;
 	}
 
 	sun.sun_family = AF_UNIX;
@@ -540,7 +515,7 @@ sockets_unix_socket_listen(struct privsep *ps, struct socket *sock)
 		log_warn("%s: %s name too long", __func__,
 		    sock->conf.unix_socket_name);
 		close(u_fd);
-		return (-1);
+		return -1;
 	}
 
 	if (unlink(sock->conf.unix_socket_name) == -1) {
@@ -548,7 +523,7 @@ sockets_unix_socket_listen(struct privsep *ps, struct socket *sock)
 			log_warn("%s: unlink %s", __func__,
 			    sock->conf.unix_socket_name);
 			close(u_fd);
-			return (-1);
+			return -1;
 		}
 	}
 
@@ -559,7 +534,7 @@ sockets_unix_socket_listen(struct privsep *ps, struct socket *sock)
 		log_warn("%s: bind: %s", __func__, sock->conf.unix_socket_name);
 		close(u_fd);
 		(void)umask(old_umask);
-		return (-1);
+		return -1;
 	}
 
 	(void)umask(old_umask);
@@ -568,7 +543,7 @@ sockets_unix_socket_listen(struct privsep *ps, struct socket *sock)
 		log_warn("%s: chmod", __func__);
 		close(u_fd);
 		(void)unlink(sock->conf.unix_socket_name);
-		return (-1);
+		return -1;
 	}
 
 	if (chown(sock->conf.unix_socket_name, ps->ps_pw->pw_uid,
@@ -576,12 +551,12 @@ sockets_unix_socket_listen(struct privsep *ps, struct socket *sock)
 		log_warn("%s: chown", __func__);
 		close(u_fd);
 		(void)unlink(sock->conf.unix_socket_name);
-		return (-1);
+		return -1;
 	}
 
 	if (listen(u_fd, SOCKS_BACKLOG) == -1) {
 		log_warn("%s: listen", __func__);
-		return (-1);
+		return -1;
 	}
 
 	return u_fd;
@@ -613,7 +588,7 @@ sockets_create_socket(struct addresslist *al, in_port_t port)
 		if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &o_val,
 		    sizeof(int)) == -1) {
 			log_warn("%s: setsockopt error", __func__);
-			return (-1);
+			return -1;
 		}
 
 		/* non-blocking */
@@ -638,7 +613,7 @@ sockets_create_socket(struct addresslist *al, in_port_t port)
 	return (fd);
 fail:
 	free(a);
-	return (-1);
+	return -1;
 }
 
 int
@@ -742,4 +717,25 @@ err:
 	close(s);
 	if (c != NULL)
 		free(c);
+}
+
+void
+sockets_rlimit(int maxfd)
+{
+	struct rlimit rl;
+
+	if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
+		fatal("%s: failed to get resource limit", __func__);
+	log_debug("%s: max open files %llu", __func__, rl.rlim_max);
+
+	/*
+	 * Allow the maximum number of open file descriptors for this
+	 * login class (which should be the class "daemon" by default).
+	 */
+	if (maxfd == -1)
+		rl.rlim_cur = rl.rlim_max;
+	else
+		rl.rlim_cur = MAXIMUM(rl.rlim_max, (rlim_t)maxfd);
+	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
+		fatal("%s: failed to set resource limit", __func__);
 }
