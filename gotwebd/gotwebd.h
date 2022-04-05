@@ -146,6 +146,7 @@ struct fcgi_response {
 
 struct request {
 	struct socket			*sock;
+	struct server			*srv;
 	struct transport		*t;
 	struct event			 ev;
 	struct event			 tmo;
@@ -191,7 +192,8 @@ struct address {
 TAILQ_HEAD(addresslist, address);
 
 struct transport {
-	/* TAILQ_HEAD(headers, gw_header)	 gw_headers; */
+	TAILQ_HEAD(headers, repo_header) repo_headers;
+	struct repo_dir		*repo_dir;
 	struct querystring	*qs;
 	char			*next_id;
 	char			*next_prev_id;
@@ -361,15 +363,6 @@ enum query_actions {
 	TAGS,
 	TREE,
 	ACTIONS__MAX,
-};
-
-struct repo_dir {
-	char			*name;
-	char			*owner;
-	char			*description;
-	char			*url;
-	char			*age;
-	char			*path;
 };
 
 extern struct gotwebd	*gotwebd_env;

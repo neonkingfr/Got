@@ -31,8 +31,18 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "got_path.h"
 #include "got_error.h"
+#include "got_object.h"
+#include "got_reference.h"
+#include "got_repository.h"
+#include "got_path.h"
+#include "got_cancel.h"
+#include "got_worktree.h"
+#include "got_diff.h"
+#include "got_commit_graph.h"
+#include "got_blame.h"
+#include "got_privsep.h"
+#include "got_opentemp.h"
 
 #include "proc.h"
 #include "gotwebd.h"
@@ -63,53 +73,6 @@ static const struct action_keys action_keys[] = {
 	{ "tree",	TREE },
 };
 
-static const struct got_error *gotweb_init_querystring(struct querystring **);
-static const struct got_error *gotweb_parse_querystring(struct querystring **,
-    char *);
-static const struct got_error *gotweb_assign_querystring(struct querystring **,
-    char *, char *);
-static const struct got_error *gotweb_render_content_type(struct request *,
-    uint8_t *);
-static const struct got_error *gotweb_render_header(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_footer(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_index(struct request *,
-    struct server *);
-static const struct got_error *gotweb_escape_html(char **, const char *);
-static const struct got_error *gotweb_init_repo_dir(struct repo_dir **,
-    const char *);
-static const struct got_error *gotweb_load_got_path(struct server *,
-    struct repo_dir *);
-static const struct got_error *gotweb_get_repo_description(char **,
-    struct server *, char *);
-static const struct got_error *gotweb_get_clone_url(char **, struct server *,
-    char *);
-static const struct got_error *gotweb_render_navs(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_blame(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_blob(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_briefs(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_commits(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_diff(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_summary(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_tag(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_tags(struct request *,
-    struct server *);
-static const struct got_error *gotweb_render_tree(struct request *,
-    struct server *);
-
-static void gotweb_free_querystring(struct querystring *);
-
-struct server *gotweb_get_server(uint8_t *, uint8_t *);
-
 enum gw_ref_tm {
 	TM_DIFF,
 	TM_LONG,
@@ -119,6 +82,65 @@ enum gw_tags_type {
 	TAGBRIEF,
 	TAGFULL,
 };
+
+struct repo_dir {
+	char			*name;
+	char			*owner;
+	char			*description;
+	char			*url;
+	char			*age;
+	char			*path;
+};
+
+struct repo_header {
+	TAILQ_ENTRY(repo_header)	 entry;
+	struct got_reflist_head		 refs;
+	char				*path;
+
+	char			*refs_str;
+	char			*commit_id; /* id_str1 */
+	char			*parent_id; /* id_str2 */
+	char			*tree_id;
+	char			*author;
+	char			*committer;
+	char			*commit_msg;
+	time_t			 committer_time;
+};
+
+static const struct got_error *gotweb_init_querystring(struct querystring **);
+static const struct got_error *gotweb_parse_querystring(struct querystring **,
+    char *);
+static const struct got_error *gotweb_assign_querystring(struct querystring **,
+    char *, char *);
+static const struct got_error *gotweb_render_content_type(struct request *,
+    uint8_t *);
+static const struct got_error *gotweb_render_header(struct request *);
+static const struct got_error *gotweb_render_footer(struct request *);
+static const struct got_error *gotweb_render_index(struct request *);
+static const struct got_error *gotweb_escape_html(char **, const char *);
+static const struct got_error *gotweb_init_repo_dir(struct repo_dir **,
+    const char *);
+static const struct got_error *gotweb_load_got_path(struct server *,
+    struct repo_dir *);
+static const struct got_error *gotweb_get_repo_description(char **,
+    struct server *, char *);
+static const struct got_error *gotweb_get_clone_url(char **, struct server *,
+    char *);
+static const struct got_error *gotweb_render_navs(struct request *, int);
+static const struct got_error *gotweb_render_blame(struct request *);
+static const struct got_error *gotweb_render_blob(struct request *);
+static const struct got_error *gotweb_render_briefs(struct request *);
+static const struct got_error *gotweb_render_commits(struct request *);
+static const struct got_error *gotweb_render_diff(struct request *);
+static const struct got_error *gotweb_render_summary(struct request *);
+static const struct got_error *gotweb_render_tag(struct request *);
+static const struct got_error *gotweb_render_tags(struct request *);
+static const struct got_error *gotweb_render_tree(struct request *);
+
+static void gotweb_free_querystring(struct querystring *);
+static void gotweb_free_repo_dir(struct repo_dir *);
+
+struct server *gotweb_get_server(uint8_t *, uint8_t *);
 
 FILE *
 gotweb_opentemp(int priv_fd)
@@ -143,9 +165,11 @@ void
 gotweb_process_request(struct request *c)
 {
 	const struct got_error *error = NULL;
-	struct server *srv;
+	struct querystring *qs = c->t->qs;
+	struct transport *t = c->t;
+
 	uint8_t err[] = "gotwebd experienced an error: ";
-	int erre = 0;
+	int erre = 0, h_s = 0;
 
 	/* don't process any further if client disconnected */
 	if (c->sock->client_status == CLIENT_DISCONNECT) {
@@ -153,113 +177,123 @@ gotweb_process_request(struct request *c)
 		return;
 	}
 	/* get the gotwebd server */
-	srv = gotweb_get_server(c->document_root, c->http_host);
-	if (srv == NULL) {
+	c->srv = gotweb_get_server(c->document_root, c->http_host);
+	if (c->srv == NULL) {
 		log_warnx("%s: error server is NULL", __func__);
 		goto err;
 	}
 	/* parse our querystring */
-	error = gotweb_init_querystring(&c->t->qs);
+	error = gotweb_init_querystring(&qs);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
 		goto err;
 	}
-	error = gotweb_parse_querystring(&c->t->qs, c->querystring);
+	error = gotweb_parse_querystring(&qs, c->querystring);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
 		goto err;
 	}
 
+	if (qs->action != INDEX) {
+		error = gotweb_init_repo_dir(&t->repo_dir, qs->path);
+		if (error)
+			goto done;
+		error = gotweb_load_got_path(c->srv, t->repo_dir);
+		if (error)
+			goto done;
+		if (error && error->code == GOT_ERR_NOT_GIT_REPO)
+			error = NULL;
+		else if (error)
+			goto done;
+	}
 	/* render top of page */
-	if (c->t->qs != NULL && c->t->qs->action == BLOB) {
+	if (qs != NULL && qs->action == BLOB) {
 		error = gotweb_render_content_type(c, "text/text");
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		/* got_render_blob; */
-		if (fcgi_gen_response(c, "render blob here") == -1)
-			return;
+		error = gotweb_render_blob(c);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		return;
 	} else {
 		error = gotweb_render_content_type(c, "text/html");
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
+		h_s = 1;
 	}
 
-	error = gotweb_render_header(c, srv);
+	error = gotweb_render_header(c);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
 		goto err;
 	}
 
-	switch(c->t->qs->action) {
+	switch(qs->action) {
 	case BLAME:
-		error = gotweb_render_blame(c, srv);
-		if (error) {
-			log_warnx("%s: %s", __func__, error->msg);
-			goto err;
-		}
-		break;
-	case BLOB:
-		error = gotweb_render_blob(c, srv);
+		error = gotweb_render_blame(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case BRIEFS:
-		error = gotweb_render_briefs(c, srv);
+		error = gotweb_render_briefs(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case COMMITS:
-		error = gotweb_render_commits(c, srv);
+		error = gotweb_render_commits(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case DIFF:
-		error = gotweb_render_diff(c, srv);
+		error = gotweb_render_diff(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case INDEX:
-		error = gotweb_render_index(c, srv);
+		error = gotweb_render_index(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case SUMMARY:
-		error = gotweb_render_summary(c, srv);
+		error = gotweb_render_summary(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case TAG:
-		error = gotweb_render_tag(c, srv);
+		error = gotweb_render_tag(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case TAGS:
-		error = gotweb_render_tags(c, srv);
+		error = gotweb_render_tags(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
 		break;
 	case TREE:
-		error = gotweb_render_tree(c, srv);
+		error = gotweb_render_tree(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
@@ -283,10 +317,13 @@ err:
 	 * for example, if srv == NULL, how can we render anything other
 	 * than the text error?
 	 */
+	gotweb_free_repo_dir(t->repo_dir);
 	erre = 1;
-	error = gotweb_render_content_type(c, "text/text");
-	if (error)
-		return;
+	if (h_s == 0) {
+		error = gotweb_render_content_type(c, "text/text");
+		if (error)
+			return;
+	}
 	if (fcgi_gen_response(c, err) == -1)
 		return;
 	if (error) {
@@ -297,8 +334,9 @@ err:
 			return;
 	}
 done:
-	if (srv != NULL && erre == 0)
-		gotweb_render_footer(c, srv);
+	gotweb_free_repo_dir(t->repo_dir);
+	if (c->srv != NULL && erre == 0)
+		gotweb_render_footer(c);
 }
 
 struct server *
@@ -336,6 +374,7 @@ gotweb_init_transport(struct transport **t)
 	if (*t == NULL)
 		return got_error_from_errno2("%s: calloc", __func__);
 
+	(*t)->repo_dir = NULL;
 	(*t)->qs = NULL;
 	(*t)->next_id = NULL;
 	(*t)->next_prev_id = NULL;
@@ -583,10 +622,11 @@ done:
 }
 
 static const struct got_error *
-gotweb_render_header(struct request *c, struct server *srv)
+gotweb_render_header(struct request *c)
 {
 	const struct got_error *error = NULL;
 	struct querystring *qs = c->t->qs;
+	struct server *srv = c->srv;
 	char *title = NULL, *droot = NULL, *css = NULL, *gotlink = NULL;
 	char *gotimg = NULL, *sitelink = NULL;
 
@@ -739,9 +779,10 @@ done:
 }
 
 static const struct got_error *
-gotweb_render_footer(struct request *c, struct server *srv)
+gotweb_render_footer(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct server *srv = c->srv;
 	char *siteowner = NULL;
 
 	if (fcgi_gen_response(c, "<div id='site_owner_wrapper'>\n") == -1)
@@ -765,24 +806,39 @@ done:
 }
 
 static const struct got_error *
-gotweb_render_navs(struct request *c, struct server *srv)
+gotweb_render_navs(struct request *c, int a)
 {
 	const struct got_error *error = NULL;
-	char *npage = NULL, *ppage = NULL;
+	struct querystring *qs = c->t->qs;
+	struct transport *t = c->t;
+	struct server *srv = c->srv;
+	char *nhref = NULL, *phref = NULL;
 
 	if (fcgi_gen_response(c, "<div id='np_wrapper'>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c, "<div id='nav_prev'>\n") == -1)
 		goto done;
 
-	if (c->t->qs->page > 0) {
-		if (asprintf(&ppage, "%d", c->t->qs->page - 1) == -1) {
-			error = got_error_from_errno2("%s: asprintf", __func__);
-			goto done;
+	if (qs->page > 0) {
+		switch(a) {
+		case BRIEFS:
+		case COMMIT:
+		case TAGS:
+			break;
+		case INDEX:
+			if (asprintf(&phref, "page=%d",
+			    qs->page - 1) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			break;
+		default:
+			break;
 		}
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?") == -1)
 			goto  done;
-		if (fcgi_gen_response(c, ppage) == -1)
+		if (fcgi_gen_response(c, phref) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "'>Previous</a>\n") == -1)
 			goto done;
@@ -792,16 +848,23 @@ gotweb_render_navs(struct request *c, struct server *srv)
 	if (fcgi_gen_response(c, "<div id='nav_next'>\n") == -1)
 		goto done;
 
-	if (c->t->next_disp == srv->max_repos_display &&
-	    c->t->repos_total != (c->t->qs->page + 1) *
+	if (t->next_disp == srv->max_repos_display &&
+	    t->repos_total != (qs->page + 1) *
 	    srv->max_repos_display) {
-		if (asprintf(&npage, "%d", c->t->qs->page + 1) == -1) {
-			error = got_error_from_errno2("%s: asprintf", __func__);
-			goto done;
+		switch(a) {
+		case INDEX:
+			if (asprintf(&nhref, "page=%d", qs->page + 1) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			break;
+		default:
+			break;
 		}
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		if (fcgi_gen_response(c, "<a href='?") == -1)
 			goto done;
-		if (fcgi_gen_response(c, npage) == -1)
+		if (fcgi_gen_response(c, nhref) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "'>Next</a>\n") == -1)
 			goto done;
@@ -811,18 +874,21 @@ gotweb_render_navs(struct request *c, struct server *srv)
 
 	fcgi_gen_response(c, "</div>\n");
 done:
-	free(ppage);
-	free(npage);
+	free(phref);
+	free(nhref);
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_index(struct request *c, struct server *srv)
+gotweb_render_index(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct querystring *qs = c->t->qs;
+	struct transport *t = c->t;
+	struct server *srv = c->srv;
 	DIR *d;
 	struct dirent **sd_dent;
-	char *c_path = NULL;
+	char *r_path = NULL;
 	struct repo_dir *repo_dir = NULL;
 	struct stat st;
 	unsigned int d_cnt, d_i, d_disp = 0;
@@ -845,17 +911,17 @@ gotweb_render_index(struct request *c, struct server *srv)
 		    strcmp(sd_dent[d_i]->d_name, "..") == 0)
 			continue;
 
-		if (asprintf(&c_path, "%s/%s", srv->repos_path,
+		if (asprintf(&r_path, "%s/%s", srv->repos_path,
 		    sd_dent[d_i]->d_name) == -1) {
 			error = got_error_from_errno("asprintf");
 			return error;
 		}
 
-		if (lstat(c_path, &st) == 0 && S_ISDIR(st.st_mode) &&
-		    !got_path_dir_is_empty(c_path))
-		c->t->repos_total++;
-		free(c_path);
-		c_path = NULL;
+		if (lstat(r_path, &st) == 0 && S_ISDIR(st.st_mode) &&
+		    !got_path_dir_is_empty(r_path))
+		t->repos_total++;
+		free(r_path);
+		r_path = NULL;
 	}
 
 	if (fcgi_gen_response(c, "<div id='index_header'>\n") == -1)
@@ -886,9 +952,9 @@ gotweb_render_index(struct request *c, struct server *srv)
 		    strcmp(sd_dent[d_i]->d_name, "..") == 0)
 			continue;
 
-		if (c->t->qs->page > 0 && (c->t->qs->page *
-		    srv->max_repos_display) > c->t->prev_disp) {
-			c->t->prev_disp++;
+		if (qs->page > 0 && (qs->page *
+		    srv->max_repos_display) > t->prev_disp) {
+			t->prev_disp++;
 			continue;
 		}
 
@@ -914,7 +980,7 @@ gotweb_render_index(struct request *c, struct server *srv)
 		}
 render:
 		d_disp++;
-		c->t->prev_disp++;
+		t->prev_disp++;
 		if (fcgi_gen_response(c, "<div id='index_wrapper'>\n") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "<div id='index_project'>\n") == -1)
@@ -1036,7 +1102,7 @@ render:
 		gotweb_free_repo_dir(repo_dir);
 		repo_dir = NULL;
 
-		c->t->next_disp++;
+		t->next_disp++;
 		if (d_disp == srv->max_repos_display)
 			break;
 	}
@@ -1044,11 +1110,11 @@ render:
 		goto div;
 	if (srv->max_repos > 0 && srv->max_repos < srv->max_repos_display)
 		goto div;
-	if (c->t->repos_total <= srv->max_repos ||
-	    c->t->repos_total <= srv->max_repos_display)
+	if (t->repos_total <= srv->max_repos ||
+	    t->repos_total <= srv->max_repos_display)
 		goto div;
 
-	gotweb_render_navs(c, srv);
+	gotweb_render_navs(c, INDEX);
 div:
 	fcgi_gen_response(c, "</div>\n");
 done:
@@ -1058,63 +1124,196 @@ done:
 }
 
 static const struct got_error *
-gotweb_render_blame(struct request *c, struct server *srv)
+gotweb_render_blame(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_blob(struct request *c, struct server *srv)
+gotweb_render_blob(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_briefs(struct request *c, struct server *srv)
+gotweb_render_briefs(struct request *c)
+{
+	const struct got_error *error = NULL;
+
+
+	if (fcgi_gen_response(c, "<div id='briefs_title_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='briefs_title'>Commit Briefs</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='briefs_content'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='briefs_wrapper'>\n") == -1)
+		goto done;
+
+
+
+
+
+
+
+
+
+
+
+
+
+	if (fcgi_gen_response(c, "<div id='briefs_age'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='briefs_author'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='briefs_log'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "<div id='navs_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='navs'>") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "diff | tree") == -1)
+		goto done;
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+
+
+
+
+
+
+
+
+
+
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	fcgi_gen_response(c, "</div>\n");
+done:
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_commits(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_commits(struct request *c, struct server *srv)
+gotweb_render_diff(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_diff(struct request *c, struct server *srv)
+gotweb_render_summary(struct request *c)
+{
+	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct server *srv = c->srv;
+
+	if (fcgi_gen_response(c, "<div id='summary_wrapper'>\n") == -1)
+		goto done;
+
+	if (!srv->show_repo_description)
+		goto owner;
+
+	if (fcgi_gen_response(c, "<div id='description_title'>"
+	    "Description:</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='description'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, t->repo_dir->description) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+owner:
+	if (!srv->show_repo_owner)
+		goto last_change;
+
+	if (fcgi_gen_response(c, "<div id='repo_owner_title'>"
+	    "Owner:</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='repo_owner'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, t->repo_dir->owner) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+last_change:
+	if (!srv->show_repo_age)
+		goto clone_url;
+
+	if (fcgi_gen_response(c, "<div id='last_change_title'>"
+	    "Last Change:</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='last_change'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, t->repo_dir->age) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+clone_url:
+	if (!srv->show_repo_cloneurl)
+		goto content;
+
+	if (fcgi_gen_response(c, "<div id='cloneurl_title'>"
+	    "Clone URL:</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='cloneurl'>") == -1)
+		goto done;
+	if (fcgi_gen_response(c, t->repo_dir->url) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+content:
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+
+done:
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_tag(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_summary(struct request *c, struct server *srv)
+gotweb_render_tags(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
 }
 
 static const struct got_error *
-gotweb_render_tag(struct request *c, struct server *srv)
-{
-	const struct got_error *error = NULL;
-	return error;
-}
-
-static const struct got_error *
-gotweb_render_tags(struct request *c, struct server *srv)
-{
-	const struct got_error *error = NULL;
-	return error;
-}
-
-static const struct got_error *
-gotweb_render_tree(struct request *c, struct server *srv)
+gotweb_render_tree(struct request *c)
 {
 	const struct got_error *error = NULL;
 	return error;
@@ -1286,7 +1485,6 @@ gotweb_init_repo_dir(struct repo_dir **repo_dir, const char *dir)
 	(*repo_dir)->description = NULL;
 	(*repo_dir)->url = NULL;
 	(*repo_dir)->age = NULL;
-	(*repo_dir)->path = NULL;
 
 	return NULL;
 }
