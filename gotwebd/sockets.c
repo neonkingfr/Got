@@ -56,6 +56,8 @@
 
 #define SOCKS_BACKLOG 5
 
+volatile int client_cnt;
+
 struct timeval	timeout = { TIMEOUT_DEFAULT, 0 };
 
 void	 sockets_sighdlr(int, short, void *);
@@ -98,12 +100,14 @@ sockets_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 
 	socket_rlimit(-1);
 
-	/* signal_del(&ps->ps_evsigchld); */
-	/* signal_set(&ps->ps_evsigchld, SIGCHLD, sockets_sighdlr, ps); */
-	/* signal_add(&ps->ps_evsigchld, NULL); */
+	signal_del(&ps->ps_evsigchld);
+	signal_set(&ps->ps_evsigchld, SIGCHLD, sockets_sighdlr, ps);
+	signal_add(&ps->ps_evsigchld, NULL);
 
+#ifndef PROFILE
 	if (pledge("stdio rpath inet recvfd proc exec sendfd", NULL) == -1)
 		fatal("pledge");
+#endif
 }
 
 void
@@ -414,7 +418,6 @@ sockets_dispatch_gotwebd(int fd, struct privsep_proc *p, struct imsg *imsg)
 void
 sockets_sighdlr(int sig, short event, void *arg)
 {
-	log_info("%s", __func__);
 	switch (sig) {
 	case SIGHUP:
 		log_info("%s: ignoring SIGHUP", __func__);
@@ -650,7 +653,7 @@ sockets_accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 
 	if (getdtablecount() + reserve +
 	    ((*counter + 1) * FD_NEEDED) >= getdtablesize()) {
-		log_info("inflight fds exceeded");
+		log_debug("inflight fds exceeded");
 		errno = EMFILE;
 		return -1;
 	}
@@ -667,7 +670,6 @@ sockets_accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 void
 sockets_accept_paused(int fd, short events, void *arg)
 {
-	log_info("%s", __func__);
 	struct socket *sock = (struct socket *)arg;
 
 	event_add(&sock->ev, NULL);
@@ -696,13 +698,6 @@ sockets_socket_accept(int fd, short event, void *arg)
 	s = sockets_accept_reserve(fd, (struct sockaddr *)&ss, &len,
 	    FD_RESERVE, &cgi_inflight);
 
-	/* XXX: remove this */
-	log_info("table_count: %d, reserve: %d, cgi_inflight: %d, fd_needed: %d,  table_size: %d", getdtablecount(), FD_RESERVE,
-	    cgi_inflight + 1, FD_NEEDED, getdtablesize());
-	log_info("Total: %d", (getdtablecount() + FD_RESERVE +
-	    ((cgi_inflight + 1) * FD_NEEDED)));
-	/*******************/
-
 	if (s == -1) {
 		switch (errno) {
 		case EINTR:
@@ -718,6 +713,9 @@ sockets_socket_accept(int fd, short event, void *arg)
 			log_warn("%s: accept", __func__);
 		}
 	}
+
+	if (client_cnt > GOTWEBD_MAXCLIENTS)
+		goto err;
 
 	c = calloc(1, sizeof(struct request));
 	if (c == NULL) {
@@ -742,7 +740,7 @@ sockets_socket_accept(int fd, short event, void *arg)
 	c->buf_pos = 0;
 	c->buf_len = 0;
 	c->request_started = 0;
-	c->sock->request_loop = LOOP_START;
+	c->sock->client_status = CLIENT_START;
 	TAILQ_INIT(&c->response_head);
 
 	ecode = pthread_create(&c->thread, NULL, sockets_start_responder,
@@ -750,15 +748,24 @@ sockets_socket_accept(int fd, short event, void *arg)
 
 	if (ecode) {
 		log_warnx("%s: pthread_create error %d", __func__, ecode);
-		return;
+		goto err;
 	}
 
-	event_set(&c->ev, s, EV_READ | EV_PERSIST, fcgi_request, c);
+	event_set(&c->ev, s, EV_READ, fcgi_request, c);
 	event_add(&c->ev, NULL);
 
 	evtimer_set(&c->tmo, fcgi_timeout, c);
 	evtimer_add(&c->tmo, &timeout);
+
+	client_cnt++;
+
 	LIST_INSERT_HEAD(&sock->requests, c, entry);
+	return;
+err:
+	cgi_inflight--;
+	close(s);
+	if (c != NULL)
+		free(c);
 }
 
 void *
@@ -770,9 +777,9 @@ sockets_start_responder(void *arg)
 	struct fcgi_response *resp;
 	ssize_t n;
 
-	while (c->sock->request_loop > LOOP_END) {
+	while (c->sock->client_status > CLIENT_END) {
 		if (TAILQ_EMPTY(&c->response_head) &&
-		    c->sock->request_loop == LOOP_FINISH)
+		    c->sock->client_status == CLIENT_FINISH)
 			break;
 		else if (TAILQ_EMPTY(&c->response_head))
 			continue;
@@ -781,12 +788,15 @@ sockets_start_responder(void *arg)
 		dump_fcgi_record("resp ", header);
 		n = write(c->fd, resp->data + resp->data_pos, resp->data_len);
 		/* we can't write, so exit */
-		if (n == -1)
+		if (n == -1) {
+			c->sock->client_status = CLIENT_DISCONNECT;
 			break;
+		}
 		resp->data_pos += n;
 		resp->data_len -= n;
 
-		if (resp->data_len == 0 && c->sock->request_loop > LOOP_END) {
+		if (resp->data_len == 0 &&
+		    c->sock->client_status > CLIENT_END) {
 			TAILQ_REMOVE(&c->response_head, resp, entry);
 			free(resp);
 		}

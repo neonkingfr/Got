@@ -46,6 +46,7 @@ void	 dump_fcgi_end_request_body(const char *,
 	    struct fcgi_end_request_body *);
 
 extern int	 cgi_inflight;
+extern volatile int client_cnt;
 
 void
 fcgi_request(int fd, short events, void *arg)
@@ -53,6 +54,9 @@ fcgi_request(int fd, short events, void *arg)
 	struct request *c = arg;
 	ssize_t n;
 	size_t parsed = 0;
+
+	if (c->sock->client_status > CLIENT_START)
+		return;
 
 	n = read(fd, c->buf + c->buf_pos + c->buf_len,
 	    FCGI_RECORD_SIZE - c->buf_pos-c->buf_len);
@@ -103,6 +107,11 @@ size_t
 fcgi_parse_record(uint8_t *buf, size_t n, struct request *c)
 {
 	struct fcgi_record_header *h;
+
+	if (c->sock->client_status == CLIENT_DISCONNECT) {
+		fcgi_cleanup_request(c);
+		return 0;
+	}
 
 	if (n < sizeof(struct fcgi_record_header))
 		 return 0;
@@ -287,7 +296,7 @@ fcgi_timeout(int fd, short events, void *arg)
 	fcgi_cleanup_request((struct request*) arg);
 }
 
-void
+int
 fcgi_gen_response(struct request *c, char *data)
 {
 	struct fcgi_response *resp;
@@ -295,15 +304,18 @@ fcgi_gen_response(struct request *c, char *data)
 	ssize_t n = 0;
 	int i, j;
 
+	if (c->sock->client_status == CLIENT_DISCONNECT)
+		return -1;
+
 	if (data == NULL)
-		return;
+		return 0;
 
 	if (strlen(data) == 0)
-		return;
+		return 0;
 
 	if ((resp = calloc(1, sizeof(struct fcgi_response))) == NULL) {
-		log_warn("cannot calloc fcgi_response");
-		return;
+		log_warn("%s: cannot calloc fcgi_response", __func__);
+		return -1;
 	}
 
 	header = (struct fcgi_record_header*) resp->data;
@@ -324,6 +336,8 @@ fcgi_gen_response(struct request *c, char *data)
 	resp->data_pos = 0;
 	resp->data_len = n + sizeof(struct fcgi_record_header);
 	fcgi_add_response(c, resp);
+
+	return 0;
 }
 
 void
@@ -385,7 +399,7 @@ fcgi_cleanup_request(struct request *c)
 	const struct got_error *error = NULL;
 	struct fcgi_response *resp;
 
-	c->sock->request_loop = LOOP_FINISH;
+	c->sock->client_status = CLIENT_FINISH;
 
 	int errcode = pthread_join(c->thread, (void **)&error);
 	if (errcode) {
@@ -407,6 +421,7 @@ fcgi_cleanup_request(struct request *c)
 
 	LIST_REMOVE(c, entry);
 	cgi_inflight--;
+	client_cnt--;
 	free(c);
 }
 

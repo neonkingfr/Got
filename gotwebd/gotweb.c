@@ -129,6 +129,11 @@ gotweb_process_request(struct request *c)
 	uint8_t err[] = "gotwebd experienced an error: ";
 	int erre = 0;
 
+	/* don't process any further if client disconnected */
+	if (c->sock->client_status == CLIENT_DISCONNECT) {
+		fcgi_cleanup_request(c);
+		return;
+	}
 	/* get the gotwebd server */
 	srv = gotweb_get_server(c->document_root, c->http_host);
 	if (srv == NULL) {
@@ -151,7 +156,8 @@ gotweb_process_request(struct request *c)
 	if (c->t->qs != NULL && c->t->qs->action == BLOB) {
 		gotweb_render_content_type(c, "text/text");
 		/* got_render_blob; */
-		fcgi_gen_response(c, "render blob here");
+		if (fcgi_gen_response(c, "render blob here") == -1)
+			return;
 	} else
 		gotweb_render_content_type(c, "text/html");
 
@@ -174,11 +180,15 @@ err:
 	 */
 	erre = 1;
 	gotweb_render_content_type(c, "text/text");
-	fcgi_gen_response(c, err);
-	if (error)
-		fcgi_gen_response(c, (uint8_t *)error->msg);
-	else
-		fcgi_gen_response(c, "see daemon logs for details");
+	if (fcgi_gen_response(c, err) == -1)
+		return;
+	if (error) {
+		if (fcgi_gen_response(c, (uint8_t *)error->msg) == -1)
+			return;
+	} else {
+		if (fcgi_gen_response(c, "see daemon logs for details") == -1)
+			return;
+	}
 done:
 	if (srv != NULL && erre == 0)
 		gotweb_render_footer(c, srv);
@@ -505,63 +515,97 @@ gotweb_render_header(struct request *c, struct server *srv)
 		goto done;
 	}
 
-	fcgi_gen_response(c, "<!DOCTYPE html>\n<head>\n");
-	fcgi_gen_response(c, title);
-	fcgi_gen_response(c, "<meta name='viewport' "
-	    "content='initial-scale=.75, user-scalable=yes'/>\n");
-	fcgi_gen_response(c, "<meta charset='utf-8'/>\n");
-	fcgi_gen_response(c, "<meta name='msapplication-TileColor' "
-	    "content='#da532c'/>\n");
-	fcgi_gen_response(c, "<meta name='theme-color' content='#ffffff'/>\n");
-	fcgi_gen_response(c, "<link rel='apple-touch-icon' sizes='180x180' "
-	    "href='/apple-touch-icon.png'/>\n");
-	fcgi_gen_response(c, "<link rel='icon' type='image/png' sizes='32x32' "
-	    "href='/favicon-32x32.png'/>\n");
-	fcgi_gen_response(c, "<link rel='icon' type='image/png' sizes='16x16' "
-	    "href='/favicon-16x16.png'/>\n");
-	fcgi_gen_response(c, "<link rel='manifest' "
-	    "href='/site.webmanifest'/>\n");
-	fcgi_gen_response(c, "<link rel='mask-icon' "
-	    "href='/safari-pinned-tab.svg'/>\n");
-	fcgi_gen_response(c, css);
-	fcgi_gen_response(c, "</head>\n<body>\n<div id='gw_body'>\n");
-	fcgi_gen_response(c, "<div id='header'>\n<div id='got_link'>\n");
-	fcgi_gen_response(c, gotlink);
-	fcgi_gen_response(c, gotimg);
-	fcgi_gen_response(c, "</div>\n</div>\n");
-	fcgi_gen_response(c, "<div id='site_path'>\n<div id='site_link'>\n");
-	fcgi_gen_response(c, sitelink);
+	if (fcgi_gen_response(c, "<!DOCTYPE html>\n<head>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, title) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<meta name='viewport' "
+	    "content='initial-scale=.75, user-scalable=yes'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<meta charset='utf-8'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<meta name='msapplication-TileColor' "
+	    "content='#da532c'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<meta name='theme-color' content='#ffffff'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<link rel='apple-touch-icon' sizes='180x180' "
+	    "href='/apple-touch-icon.png'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<link rel='icon' type='image/png' sizes='32x32' "
+	    "href='/favicon-32x32.png'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<link rel='icon' type='image/png' sizes='16x16' "
+	    "href='/favicon-16x16.png'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<link rel='manifest' "
+	    "href='/site.webmanifest'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<link rel='mask-icon' "
+	    "href='/safari-pinned-tab.svg'/>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, css) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</head>\n<body>\n<div id='gw_body'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='header'>\n<div id='got_link'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, gotlink) == -1)
+		goto done;
+	if (fcgi_gen_response(c, gotimg) == -1)
+		goto done;
+	if (fcgi_gen_response(c, "</div>\n</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='site_path'>\n<div id='site_link'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, sitelink) == -1)
+		goto done;
 	if (qs != NULL) {
 		if (qs->path != NULL) {
-			fcgi_gen_response(c, " / ");
-			fcgi_gen_response(c, qs->path);
+			if (fcgi_gen_response(c, " / ") == -1)
+				goto done;
+			if (fcgi_gen_response(c, qs->path) == -1)
+				goto done;
 		}
 		if (qs->action) {
-			fcgi_gen_response(c, " / ");
+			if (fcgi_gen_response(c, " / ") == -1)
+				goto done;
 			switch(qs->action) {
 			case(BLAME):
-				fcgi_gen_response(c, "blame");
+				if (fcgi_gen_response(c, "blame") == -1)
+					goto done;
 				break;
 			case(BRIEFS):
-				fcgi_gen_response(c, "briefs");
+				if (fcgi_gen_response(c, "briefs") == -1)
+					goto done;
 				break;
 			case(COMMITS):
-				fcgi_gen_response(c, "commits");
+				if (fcgi_gen_response(c, "commits") == -1)
+					goto done;
 				break;
 			case(DIFF):
-				fcgi_gen_response(c, "diff");
+				if (fcgi_gen_response(c, "diff") == -1)
+					goto done;
 				break;
 			case(SUMMARY):
-				fcgi_gen_response(c, "summary");
+				if (fcgi_gen_response(c, "summary") == -1)
+					goto done;
 				break;
 			case(TAG):
-				fcgi_gen_response(c, "tag");
+				if (fcgi_gen_response(c, "tag") == -1)
+					goto done;
 				break;
 			case(TAGS):
-				fcgi_gen_response(c, "tags");
+				if (fcgi_gen_response(c, "tags") == -1)
+					goto done;
 				break;
 			case(TREE):
-				fcgi_gen_response(c, "tree");
+				if (fcgi_gen_response(c, "tree") == -1)
+					goto done;
 				break;
 			default:
 				break;
@@ -569,7 +613,8 @@ gotweb_render_header(struct request *c, struct server *srv)
 		}
 
 	}
-	fcgi_gen_response(c, "</div>\n</div>\n<div id='content'>\n");
+	if (fcgi_gen_response(c, "</div>\n</div>\n<div id='content'>\n") == -1)
+		goto done;
 done:
 	free(title);
 	free(droot);
@@ -587,16 +632,21 @@ gotweb_render_footer(struct request *c, struct server *srv)
 	const struct got_error *error = NULL;
 	char *siteowner = NULL;
 
-	fcgi_gen_response(c, "<div id='site_owner_wrapper'>\n");
-	fcgi_gen_response(c, "<div id='site_owner'>\n");
+	if (fcgi_gen_response(c, "<div id='site_owner_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='site_owner'>\n") == -1)
+		goto done;
 	if (srv->show_site_owner) {
 		error = gotweb_escape_html(&siteowner, srv->site_owner);
 		if (error)
 			goto done;
-		fcgi_gen_response(c, siteowner);
+		if (fcgi_gen_response(c, siteowner) == -1)
+			goto done;
 	} else
-		fcgi_gen_response(c, "&nbsp;");
-	fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>");
+		if (fcgi_gen_response(c, "&nbsp;") == -1)
+			goto done;
+	if (fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>") == -1)
+		goto done;
 done:
 	free(siteowner);
 
@@ -609,20 +659,27 @@ gotweb_render_navs(struct request *c, struct server *srv)
 	const struct got_error *error = NULL;
 	char *npage = NULL, *ppage = NULL;
 
-	fcgi_gen_response(c, "<div id='np_wrapper'>\n");
-	fcgi_gen_response(c, "<div id='nav_prev'>\n");
+	if (fcgi_gen_response(c, "<div id='np_wrapper'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='nav_prev'>\n") == -1)
+		goto done;
 
 	if (c->t->qs->page > 0) {
 		if (asprintf(&ppage, "%d", c->t->qs->page - 1) == -1) {
 			error = got_error_from_errno2("%s: asprintf", __func__);
 			goto done;
 		}
-		fcgi_gen_response(c, "<a href='?page=");
-		fcgi_gen_response(c, ppage);
-		fcgi_gen_response(c, "'>Previous</a>\n");
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto  done;
+		if (fcgi_gen_response(c, ppage) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>Previous</a>\n") == -1)
+			goto done;
 	}
-	fcgi_gen_response(c, "</div>\n");
-	fcgi_gen_response(c, "<div id='nav_next'>\n");
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c, "<div id='nav_next'>\n") == -1)
+		goto done;
 
 	if (c->t->next_disp == srv->max_repos_display &&
 	    c->t->repos_total != (c->t->qs->page + 1) *
@@ -631,13 +688,18 @@ gotweb_render_navs(struct request *c, struct server *srv)
 			error = got_error_from_errno2("%s: asprintf", __func__);
 			goto done;
 		}
-		fcgi_gen_response(c, "<a href='?page=");
-		fcgi_gen_response(c, npage);
-		fcgi_gen_response(c, "'>Next</a>\n");
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, npage) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "'>Next</a>\n") == -1)
+			goto done;
 	}
-	fcgi_gen_response(c, "</div>\n");
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
 
-	fcgi_gen_response(c, "</div>\n");
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
 done:
 	free(ppage);
 	free(npage);
@@ -687,18 +749,25 @@ gotweb_render_index(struct request *c, struct server *srv)
 		c_path = NULL;
 	}
 
-	fcgi_gen_response(c, "<div id='index_header'>\n");
-	fcgi_gen_response(c, "<div id='index_header_project'>Project</div>\n");
+	if (fcgi_gen_response(c, "<div id='index_header'>\n") == -1)
+		goto done;
+	if (fcgi_gen_response(c,
+	    "<div id='index_header_project'>Project</div>\n") == -1)
+		goto done;
 	if (srv->show_repo_description)
-		fcgi_gen_response(c, "<div id='index_header_description'>"
-		    "Description</div>\n");
+		if (fcgi_gen_response(c, "<div id='index_header_description'>"
+		    "Description</div>\n") == -1)
+			goto done;
 	if (srv->show_repo_owner)
-		fcgi_gen_response(c, "<div id='index_header_owner'>"
-		    "Owner</div>\n");
+		if (fcgi_gen_response(c, "<div id='index_header_owner'>"
+		    "Owner</div>\n") == -1)
+			goto done;
 	if (srv->show_repo_age)
-		fcgi_gen_response(c, "<div id='index_header_age'>"
-		    "Last Change</div>\n");
-	fcgi_gen_response(c, "</div>\n");
+		if (fcgi_gen_response(c, "<div id='index_header_age'>"
+		    "Last Change</div>\n") == -1)
+			goto done;
+	if (fcgi_gen_response(c, "</div>\n") == -1)
+		goto done;
 
 	for (d_i = 0; d_i < d_cnt; d_i++) {
 		if (srv->max_repos > 0 && (d_i - 2) == srv->max_repos)
@@ -738,74 +807,123 @@ gotweb_render_index(struct request *c, struct server *srv)
 render:
 		d_disp++;
 		c->t->prev_disp++;
-		fcgi_gen_response(c, "<div id='index_wrapper'>\n");
-		fcgi_gen_response(c, "<div id='index_project'>\n");
+		if (fcgi_gen_response(c, "<div id='index_wrapper'>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='index_project'>\n") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "<a href=?path=");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "&action=summary>");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "</a>");
+		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+			goto done;;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=summary>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "</div>\n");
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
 
 		if (srv->show_repo_description) {
-			fcgi_gen_response(c,
-			    "<div id='index_project_description'>\n");
-			fcgi_gen_response(c, repo_dir->description);
-			fcgi_gen_response(c, "</div>\n");
+			if (fcgi_gen_response(c,
+			    "<div id='index_project_description'>\n") == -1)
+				goto done;
+			if (fcgi_gen_response(c, repo_dir->description) == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
 		}
 
 		if (srv->show_repo_owner) {
-			fcgi_gen_response(c,
-			    "<div id='index_project_owner'>\n");
-			fcgi_gen_response(c, repo_dir->owner);
-			fcgi_gen_response(c, "</div>\n");
+			if (fcgi_gen_response(c,
+			    "<div id='index_project_owner'>\n") == -1)
+				goto done;
+			if (fcgi_gen_response(c, repo_dir->owner) == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
 		}
 
 		if (srv->show_repo_age) {
-			fcgi_gen_response(c, "<div id='index_project_age'>\n");
-			fcgi_gen_response(c, repo_dir->age);
-			fcgi_gen_response(c, "</div>\n");
+			if (fcgi_gen_response(c,
+			    "<div id='index_project_age'>\n") == -1)
+				goto done;
+			if (fcgi_gen_response(c, repo_dir->age) == -1)
+				goto done;
+			if (fcgi_gen_response(c, "</div>\n") == -1)
+				goto done;
 		}
 
-		fcgi_gen_response(c, "<div id='navs_wrapper'>");
-		fcgi_gen_response(c, "<div id='navs'>");
+		if (fcgi_gen_response(c, "<div id='navs_wrapper'>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='navs'>") == -1)
+			goto done;;
 
-		fcgi_gen_response(c, "<a href=?path=");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "&action=summary>");
-		fcgi_gen_response(c, "summary");
-		fcgi_gen_response(c, "</a> | ");
+		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=summary>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "summary") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a> | ") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "<a href=?path=");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "&action=briefs>");
-		fcgi_gen_response(c, "commit briefs");
-		fcgi_gen_response(c, "</a> | ");
+		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=briefs>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "commit briefs") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a> | ") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "<a href=?path=");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "&action=commits>");
-		fcgi_gen_response(c, "commits");
-		fcgi_gen_response(c, "</a> | ");
+		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=commits>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "commits") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a> | ") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "<a href=?path=");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "&action=tags>");
-		fcgi_gen_response(c, "tags");
-		fcgi_gen_response(c, "</a> | ");
+		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=tags>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "tags") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a> | ") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "<a href=?path=");
-		fcgi_gen_response(c, repo_dir->name);
-		fcgi_gen_response(c, "&action=tree>");
-		fcgi_gen_response(c, "tree");
-		fcgi_gen_response(c, "</a>");
+		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, repo_dir->name) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&action=tree>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "tree") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</a>") == -1)
+			goto done;
 
-		fcgi_gen_response(c, "</div>\n");
-		fcgi_gen_response(c, "<div id='dotted_line'></div>");
-		fcgi_gen_response(c, "</div>\n");
-		fcgi_gen_response(c, "</div>\n");
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "<div id='dotted_line'></div>") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto done;
 
 		gotweb_free_repo_dir(repo_dir);
 		repo_dir = NULL;
@@ -816,16 +934,17 @@ render:
 	}
 
 	if (srv->max_repos_display == 0)
-		goto done;
+		goto div;
 	if (srv->max_repos > 0 && srv->max_repos < srv->max_repos_display)
-		goto done;
+		goto div;
 	if (c->t->repos_total <= srv->max_repos ||
 	    c->t->repos_total <= srv->max_repos_display)
-		goto done;
+		goto div;
 
 	gotweb_render_navs(c, srv);
-done:
+div:
 	fcgi_gen_response(c, "</div>\n");
+done:
 	if (d != NULL && closedir(d) == EOF && error == NULL)
 		error = got_error_from_errno("closedir");
 	return error;
@@ -961,10 +1080,6 @@ done:
 	    repo_dir->path);
 	if (error)
 		goto errored;
-
-	/*********************************************************/
-	/* fds are not getting cleared with got_repo_close. WTF? */
-
 	error = got_get_repo_owner(&repo_dir->owner, srv, repo_dir->path);
 	if (error)
 		goto errored;
@@ -972,9 +1087,6 @@ done:
 	    NULL, TM_DIFF);
 	if (error)
 		goto errored;
-
-	/*********************************************************/
-
 	error = gotweb_get_clone_url(&repo_dir->url, srv, repo_dir->path);
 errored:
 	free(dir_test);

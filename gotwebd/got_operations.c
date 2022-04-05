@@ -115,13 +115,6 @@ got_get_repo_age(char **repo_age, struct server *srv, char *dir,
 		if (error)
 			goto done;
 
-		/*
-		 * XXX: we have a performance issue here. once we run
-		 * got_object_open_as_commit, it slows everything down here for
-		 * some reason that I don't know at this point. This is really
-		 * only noticed on very large repos.
-		 */
-
 		error = got_object_open_as_commit(&commit, repo, id);
 		free(id);
 		if (error)

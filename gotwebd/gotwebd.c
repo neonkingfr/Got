@@ -248,6 +248,11 @@ main(int argc, char **argv)
 	if (gotwebd_configure(env) == -1)
 		fatalx("configuration failed");
 
+#ifdef PROFILE
+	if (unveil("gmon.out", "rwc") != 0)
+		err(1, "gmon.out");
+#endif
+
 	if (unveil(strlen(env->httpd_chroot) > 0 ? env->httpd_chroot :
 	    D_HTTPD_CHROOT, "rwc") == -1)
 		err(1, "unveil");
@@ -261,8 +266,10 @@ main(int argc, char **argv)
 	if (unveil(NULL, NULL) != 0)
 		err(1, "unveil");
 
+#ifndef PROFILE
 	if (pledge("stdio rpath wpath cpath inet unix", NULL) == -1)
 		err(1, "pledge");
+#endif
 
 	event_dispatch();
 

@@ -39,6 +39,7 @@
 
 #define GOTWEBD_USER		 "www"
 
+#define GOTWEBD_MAXCLIENTS	 1024
 #define GOTWEBD_MAXTEXT		 511
 #define GOTWEBD_MAXNAME		 64
 #define GOTWEBD_MAXPORT		 6
@@ -243,10 +244,11 @@ struct server {
 };
 TAILQ_HEAD(serverlist, server);
 
-enum loop_type {
-	LOOP_END,
-	LOOP_START,
-	LOOP_FINISH,
+enum client_action {
+	CLIENT_END,
+	CLIENT_START,
+	CLIENT_FINISH,
+	CLIENT_DISCONNECT,
 };
 
 enum sock_type {
@@ -291,7 +293,7 @@ struct socket {
 	struct event	  ev;
 	struct event	  pause;
 
-	int		  request_loop;
+	int		  client_status;
 };
 TAILQ_HEAD(socketlist, socket);
 
@@ -406,12 +408,12 @@ int	 cmdline_symset(char *);
 
 /* fcgi.c */
 void	 fcgi_request(int, short, void *);
-void	 fcgi_gen_response(struct request *, char *);
 void	 fcgi_add_response(struct request *, struct fcgi_response *);
 void	 fcgi_timeout(int, short, void *);
 void	 fcgi_cleanup_request(struct request *);
 void	 fcgi_create_end_record(struct request *);
 void	 dump_fcgi_record(const char *, struct fcgi_record_header *);
+int	 fcgi_gen_response(struct request *, char *);
 
 /* got_operations.c */
 const struct got_error	*got_tests(struct querystring *);

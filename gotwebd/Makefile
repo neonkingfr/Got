@@ -29,6 +29,13 @@ DPADD =		${LIBEVENT} ${LIBUTIL}
 NOMAN = Yes
 .endif
 
+.if defined(PROFILE)
+CPPFLAGS += -DPROFILE
+DEBUG = -O0 -pg -g -static
+.else
+DEBUG = -O0 -g
+.endif
+
 realinstall:
 	if [ ! -d ${DESTDIR}${PUB_REPOS_DIR}/. ]; then \
 		${INSTALL} -d -o root -g daemon -m 755 ${DESTDIR}${PUB_REPOS_DIR}; \
