@@ -308,6 +308,7 @@ struct querystring {
 	char		*folder;
 	char		*headref;
 	unsigned int	 page;
+	char		*page_str;
 	char		*path;
 	char		*prev;
 	char		*prev_prev;

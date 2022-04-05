@@ -124,6 +124,7 @@ config_getserver(struct gotwebd *env, struct imsg *imsg)
 
 	if (IMSG_DATA_SIZE(imsg) != sizeof(*srv)) {
 		log_debug("%s: imsg size error", __func__);
+		free(srv);
 		return 1;
 	}
 

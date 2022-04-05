@@ -550,6 +550,12 @@ qa_found:
 		case PAGE:
 			if (strlen(value) == 0)
 				break;
+			(*qs)->page_str = strdup(value);
+			if ((*qs)->page_str == NULL) {
+				error = got_error_from_errno2("%s: strdup",
+				    __func__);
+				goto done;
+			}
 			(*qs)->page = strtonum(value, INT64_MIN, INT64_MAX,
 			    &errstr);
 			if (errstr) {
@@ -598,6 +604,7 @@ gotweb_free_querystring(struct querystring *qs)
 		free(qs->file);
 		free(qs->folder);
 		free(qs->headref);
+		free(qs->page_str);
 		free(qs->path);
 		free(qs->prev);
 		free(qs->prev_prev);
@@ -693,8 +700,8 @@ gotweb_render_header(struct request *c)
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
-	if (asprintf(&sitelink, "<a href='/%s' alt='sitelink'>%s</a>\n",
-	    c->document_root, srv->site_link) == -1) {
+	if (asprintf(&sitelink, "<a href='/%s?page=%d' alt='sitelink'>%s</a>\n",
+	    c->document_root, qs->page, srv->site_link) == -1) {
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
@@ -840,22 +847,36 @@ static const struct got_error *
 gotweb_render_navs(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct querystring *qs = c->t->qs;
+	struct transport *t = c->t;
 	struct server *srv = c->srv;
-	char *npage = NULL, *ppage = NULL;
+	char *nhref = NULL, *phref = NULL;
+	int disp = 0;
 
 	if (fcgi_gen_response(c, "<div id='np_wrapper'>\n") == -1)
 		goto done;
 	if (fcgi_gen_response(c, "<div id='nav_prev'>\n") == -1)
 		goto done;
 
-	if (c->t->qs->page > 0) {
-		if (asprintf(&ppage, "%d", c->t->qs->page - 1) == -1) {
-			error = got_error_from_errno2("%s: asprintf", __func__);
-			goto done;
+	switch(qs->action) {
+	case INDEX:
+		if (qs->page > 0) {
+			if (asprintf(&phref, "page=%d", qs->page - 1) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			disp = 1;
 		}
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+		break;
+	default:
+		disp = 0;
+		break;
+	}
+	if (disp) {
+		if (fcgi_gen_response(c, "<a href='?") == -1)
 			goto  done;
-		if (fcgi_gen_response(c, ppage) == -1)
+		if (fcgi_gen_response(c, phref) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "'>Previous</a>\n") == -1)
 			goto done;
@@ -865,16 +886,29 @@ gotweb_render_navs(struct request *c)
 	if (fcgi_gen_response(c, "<div id='nav_next'>\n") == -1)
 		goto done;
 
-	if (c->t->next_disp == srv->max_repos_display &&
-	    c->t->repos_total != (c->t->qs->page + 1) *
-	    srv->max_repos_display) {
-		if (asprintf(&npage, "%d", c->t->qs->page + 1) == -1) {
-			error = got_error_from_errno2("%s: asprintf", __func__);
-			goto done;
+	disp = 0;
+
+	switch(qs->action) {
+	case INDEX:
+		if (t->next_disp == srv->max_repos_display &&
+		    t->repos_total != (qs->page + 1) *
+		    srv->max_repos_display) {
+			if (asprintf(&nhref, "page=%d", qs->page + 1) == -1) {
+				error = got_error_from_errno2("%s: asprintf",
+				    __func__);
+				goto done;
+			}
+			disp = 1;
+			break;
+		default:
+			disp = 0;
+			break;
 		}
-		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+	}
+	if (disp) {
+		if (fcgi_gen_response(c, "<a href='?") == -1)
 			goto done;
-		if (fcgi_gen_response(c, npage) == -1)
+		if (fcgi_gen_response(c, nhref) == -1)
 			goto done;
 		if (fcgi_gen_response(c, "'>Next</a>\n") == -1)
 			goto done;
@@ -884,8 +918,8 @@ gotweb_render_navs(struct request *c)
 
 	fcgi_gen_response(c, "</div>\n");
 done:
-	free(ppage);
-	free(npage);
+	free(phref);
+	free(nhref);
 	return error;
 }
 
@@ -971,8 +1005,6 @@ gotweb_render_index(struct request *c)
 		if (error)
 			goto done;
 
-		/* c->t->repo_dir = repo_dir; */
-
 		error = gotweb_load_got_path(srv, repo_dir);
 		if (error && error->code == GOT_ERR_NOT_GIT_REPO) {
 			error = NULL;
@@ -998,11 +1030,15 @@ render:
 		if (fcgi_gen_response(c, "<div id='index_project'>\n") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href=?path=") == -1)
-			goto done;;
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
+			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&action=summary>") == -1)
+		if (fcgi_gen_response(c, "&action=summary'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
@@ -1047,55 +1083,75 @@ render:
 		if (fcgi_gen_response(c, "<div id='navs'>") == -1)
 			goto done;;
 
-		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&action=summary>") == -1)
+		if (fcgi_gen_response(c, "&action=summary'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "summary") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&action=briefs>") == -1)
+		if (fcgi_gen_response(c, "&action=briefs'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "commit briefs") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&action=commits>") == -1)
+		if (fcgi_gen_response(c, "&action=commits'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "commits") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&action=tags>") == -1)
+		if (fcgi_gen_response(c, "&action=tags'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "tags") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "</a> | ") == -1)
 			goto done;
 
-		if (fcgi_gen_response(c, "<a href=?path=") == -1)
+		if (fcgi_gen_response(c, "<a href='?page=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->page_str) == -1)
+			goto done;
+		if (fcgi_gen_response(c, "&path=") == -1)
 			goto done;
 		if (fcgi_gen_response(c, repo_dir->name) == -1)
 			goto done;
-		if (fcgi_gen_response(c, "&action=tree>") == -1)
+		if (fcgi_gen_response(c, "&action=tree'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "tree") == -1)
 			goto done;
