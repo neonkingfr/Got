@@ -606,7 +606,7 @@ gotweb_render_header(struct request *c)
 	struct server *srv = c->srv;
 	struct querystring *qs = c->t->qs;
 	char *title = NULL, *droot = NULL, *css = NULL, *gotlink = NULL;
-	char *gotimg = NULL, *sitelink = NULL;
+	char *gotimg = NULL, *sitelink = NULL, *summlink = NULL;
 
 	if (strlen(c->document_root) > 0) {
 		if (asprintf(&droot, "/%s/", c->document_root) == -1) {
@@ -643,6 +643,12 @@ gotweb_render_header(struct request *c)
 	if (asprintf(&sitelink, "<a href='/%s?index_page=%d' "
 	    "alt='sitelink'>%s</a>", c->document_root, qs->index_page,
 	    srv->site_link) == -1) {
+		error = got_error_from_errno2("%s: asprintf", __func__);
+		goto done;
+	}
+	if (asprintf(&summlink, "<a href='/%s?index_page=%d&path=%s"
+	    "&action=summary' alt='summlink'>%s</a>", c->document_root,
+	    qs->index_page, qs->path, qs->path) == -1) {
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
@@ -700,7 +706,7 @@ gotweb_render_header(struct request *c)
 		if (qs->path != NULL) {
 			if (fcgi_gen_response(c, " / ") == -1)
 				goto done;
-			if (fcgi_gen_response(c, qs->path) == -1)
+			if (fcgi_gen_response(c, summlink) == -1)
 				goto done;
 		}
 		if (qs->action != INDEX) {
@@ -753,6 +759,7 @@ done:
 	free(gotlink);
 	free(gotimg);
 	free(sitelink);
+	free(summlink);
 
 	return error;
 }

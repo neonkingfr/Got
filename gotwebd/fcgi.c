@@ -352,6 +352,8 @@ fcgi_send_response(struct request *c, struct fcgi_response *resp)
 		resp->data_len = padded_len;
 	}
 
+	dump_fcgi_record("resp ", header);
+
 	if ((write(c->fd, resp->data + resp->data_pos, resp->data_len)) == -1)
 		c->sock->client_status = CLIENT_DISCONNECT;
 
