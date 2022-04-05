@@ -616,7 +616,7 @@ got_get_repo_tags(struct request *c, int limit)
 			goto err;
 	}
 
-	if (qs->action != SUMMARY && qs->action != TAGS) {
+	if (limit == 1) {
 		error = got_object_open_as_commit(&commit, repo, id);
 		if (error)
 			goto err;
@@ -703,20 +703,6 @@ got_get_repo_tags(struct request *c, int limit)
 				goto err;
 		}
 
-		if (qs->action != SUMMARY && qs->action != TAGS) {
-			commit_msg = commit_msg0;
-			while (*commit_msg == '\n')
-				commit_msg++;
-
-			new_repo_tag->commit_msg = strdup(commit_msg);
-			if (new_repo_tag->commit_msg == NULL) {
-				error = got_error_from_errno("strdup");
-				free(commit_msg0);
-				goto err;
-			}
-			free(commit_msg0);
-		}
-
 		new_repo_tag->commit_id = strdup(id_str);
 		if (new_repo_tag->commit_id == NULL)
 			goto err;
@@ -771,6 +757,20 @@ got_get_repo_tags(struct request *c, int limit)
 
 		while (*new_repo_tag->tag_commit == '\n')
 			new_repo_tag->tag_commit++;
+
+		if (limit == 1) {
+			commit_msg = commit_msg0;
+			while (*commit_msg == '\n')
+				commit_msg++;
+
+			new_repo_tag->commit_msg = strdup(commit_msg);
+			if (new_repo_tag->commit_msg == NULL) {
+				error = got_error_from_errno("strdup");
+				free(commit_msg0);
+				goto err;
+			}
+			free(commit_msg0);
+		}
 
 		if (limit && --limit == 0) {
 			if (chk_multi == 0)

@@ -1800,7 +1800,7 @@ gotweb_render_tag(struct request *c)
 	if (error)
 		goto done;
 
-	rt = TAILQ_FIRST(&t->repo_tags);
+	rt = TAILQ_LAST(&t->repo_tags, repo_tags_head);
 
 	error = gotweb_get_time_str(&age, rt->tagger_time, TM_LONG);
 	if (error)
