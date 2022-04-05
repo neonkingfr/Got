@@ -761,7 +761,6 @@ gotweb_render_index(struct request *c, struct server *srv)
 		if (lstat(c_path, &st) == 0 && S_ISDIR(st.st_mode) &&
 		    !got_path_dir_is_empty(c_path))
 		c->t->repos_total++;
-
 		free(c_path);
 		c_path = NULL;
 	}
@@ -813,10 +812,9 @@ gotweb_render_index(struct request *c, struct server *srv)
 			goto done;
 
 		if (lstat(repo_dir->path, &st) == 0 && S_ISDIR(st.st_mode) &&
-		    !got_path_dir_is_empty(repo_dir->path)){
-			c->t->repos_total++;
+		    !got_path_dir_is_empty(repo_dir->path))
 			goto render;
-		} else {
+		else {
 			gotweb_free_repo_dir(repo_dir);
 			repo_dir = NULL;
 			continue;
@@ -949,7 +947,7 @@ render:
 		if (d_disp == srv->max_repos_display)
 			break;
 	}
-
+log_warn("tot: %d", c->t->repos_total);
 	if (srv->max_repos_display == 0)
 		goto div;
 	if (srv->max_repos > 0 && srv->max_repos < srv->max_repos_display)
