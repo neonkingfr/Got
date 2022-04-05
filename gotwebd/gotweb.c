@@ -199,7 +199,6 @@ done:
 	gotweb_free_querystring(qs);
 	cgi_inflight--;
 	c->inflight_fds_accounted = 1;
-	c->gotweb_flags |= GOT_DONE;
 }
 
 struct server *
@@ -565,6 +564,7 @@ gotweb_render_footer(struct request *c, struct server *srv)
 		fcgi_gen_response(c, "&nbsp;");
 	fcgi_gen_response(c, "\n</div>\n</div>\n</body>\n</html>");
 done:
+	fcgi_create_end_record(c);
 	free(siteowner);
 
 	return error;
@@ -580,6 +580,8 @@ gotweb_render_index(struct request *c, struct server *srv)
 	struct stat st;
 	unsigned int d_cnt, d_i;
 
+	char *test = NULL; int t = 0;
+
 	fcgi_gen_response(c, "<div id='index_header'>\n");
 	fcgi_gen_response(c, "<div id='index_header_project'>Project</div>\n");
 	if (srv->show_repo_description)
@@ -590,7 +592,7 @@ gotweb_render_index(struct request *c, struct server *srv)
 		    "Owner</div>\n");
 	if (srv->show_repo_age)
 		fcgi_gen_response(c, "<div id='index_header_age'>"
-		    "Last Change</div>\n");
+		    "Last Change</div>\n</div>\n");
 
 	d = opendir(srv->repos_path);
 	if (d == NULL) {
@@ -631,7 +633,11 @@ gotweb_render_index(struct request *c, struct server *srv)
 		} else
 			continue;
 render:
-		fcgi_gen_response(c, "repo<br/>");
+		/* test output for thread */
+		asprintf(&test, "repo: %d<br />", ++t);
+		fcgi_gen_response(c, test);
+		free(test);
+		test = NULL;
 	}
 
 done:

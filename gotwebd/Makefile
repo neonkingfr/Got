@@ -21,7 +21,7 @@ SRCS +=		blame.c commit_graph.c delta.c diff.c \
 MAN =		${PROG}.conf.5 ${PROG}.8
 
 CPPFLAGS +=	-I${.CURDIR}/../include -I${.CURDIR}/../lib -I${.CURDIR}
-LDADD +=	-lz -levent -lutil
+LDADD +=	-lz -levent -lutil -lpthread
 YFLAGS =
 DPADD =		${LIBEVENT} ${LIBUTIL}
 

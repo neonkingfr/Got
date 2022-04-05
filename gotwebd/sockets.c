@@ -40,6 +40,7 @@
 #include <limits.h>
 #include <netdb.h>
 #include <poll.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -60,6 +61,7 @@ void	 sockets_run(struct privsep *, struct privsep_proc *, void *);
 void	 sockets_launch(void);
 void	 sockets_accept_paused(int, short, void *);
 void	 sockets_dup_new_socket(struct socket *, struct socket *);
+void	*sockets_start_responder (void *);
 
 int	 sockets_dispatch_gotwebd(int, struct privsep_proc *, struct imsg *);
 int	 sockets_unix_socket_listen(struct privsep *, struct socket *);
@@ -674,8 +676,9 @@ sockets_socket_accept(int fd, short event, void *arg)
 	struct sockaddr_storage ss;
 	struct timeval backoff;
 	struct request *c = NULL;
+	pthread_t sock_resp_id;
 	socklen_t len;
-	int s;
+	int s, ecode;
 
 	backoff.tv_sec = 1;
 	backoff.tv_usec = 0;
@@ -718,18 +721,65 @@ sockets_socket_accept(int fd, short event, void *arg)
 	c->priv_fd = sock->priv_fd;
 	c->buf_pos = 0;
 	c->buf_len = 0;
-	c->request_started = 0;
 	c->fd = s;
 	c->buf_pos = 0;
 	c->buf_len = 0;
 	c->request_started = 0;
 	c->inflight_fds_accounted = 0;
+	c->sock->request_loop = LOOP_START;
 	TAILQ_INIT(&c->response_head);
+
+	ecode = pthread_create(&sock_resp_id, NULL, sockets_start_responder,
+	    (void *)c);
+
+	if (ecode) {
+		log_warnx("%s: pthread_create error %d", __func__, ecode);
+		return;
+	}
 
 	event_set(&c->ev, s, EV_READ | EV_PERSIST, fcgi_request, c);
 	event_add(&c->ev, NULL);
-	event_set(&c->resp_ev, s, EV_WRITE | EV_PERSIST, fcgi_response, c);
+
 	evtimer_set(&c->tmo, fcgi_timeout, c);
 	evtimer_add(&c->tmo, &timeout);
 	LIST_INSERT_HEAD(&sock->requests, c, entry);
+}
+
+void *
+sockets_start_responder(void *arg)
+{
+	const struct got_error *error = NULL;
+	struct request *c = (struct request *)arg;
+	struct fcgi_record_header *header;
+	struct fcgi_response *resp;
+	ssize_t n;
+
+	while (c->sock->request_loop > LOOP_END) {
+		if (TAILQ_EMPTY(&c->response_head))
+			continue;
+	    	resp = TAILQ_FIRST(&c->response_head);
+		header = (struct fcgi_record_header*) resp->data;
+		dump_fcgi_record("resp ", header);
+		n = write(c->fd, resp->data + resp->data_pos, resp->data_len);
+		if (n == -1) {
+			if (errno == EAGAIN || errno == EINTR)
+				goto done;
+			c->sock->request_loop = LOOP_END;
+			goto err;
+		}
+		resp->data_pos += n;
+		resp->data_len -= n;
+		if (resp->data_len == 0 && c->sock->request_loop > LOOP_END) {
+			TAILQ_REMOVE(&c->response_head, resp, entry);
+			free(resp);
+		}
+		if (c->sock->request_loop == LOOP_FINISH &&
+		    TAILQ_EMPTY(&c->response_head))
+			break;
+	}
+done:
+	c->sock->request_loop = LOOP_END;
+	fcgi_cleanup_request(c);
+err:
+	return (void *)error;
 }

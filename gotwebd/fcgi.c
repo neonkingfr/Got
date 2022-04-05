@@ -36,10 +36,6 @@ void	 fcgi_parse_begin_request(uint8_t *, uint16_t, struct request *,
 	    uint16_t);
 void	 fcgi_parse_params(uint8_t *, uint16_t, struct request *, uint16_t);
 
-void	 fcgi_create_end_record(struct request *);
-void	 fcgi_cleanup_request(struct request *);
-
-void	 dump_fcgi_record(const char *, struct fcgi_record_header *);
 void	 dump_fcgi_record_header(const char *, struct fcgi_record_header *);
 void	 dump_fcgi_begin_request_body(const char *,
 	    struct fcgi_begin_request_body *);
@@ -285,42 +281,6 @@ fcgi_parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 }
 
 void
-fcgi_response(int fd, short events, void *arg)
-{
-	struct request *c;
-	struct fcgi_record_header *header;
-	struct fcgi_response *resp;
-	ssize_t n;
-
-	c = arg;
-
-	while ((resp = TAILQ_FIRST(&c->response_head))) {
-		header = (struct fcgi_record_header*) resp->data;
-		dump_fcgi_record("resp ", header);
-		n = write(fd, resp->data + resp->data_pos, resp->data_len);
-		if (n == -1) {
-			if (errno == EAGAIN || errno == EINTR)
-				return;
-			fcgi_cleanup_request(c);
-			return;
-		}
-		resp->data_pos += n;
-		resp->data_len -= n;
-		if (resp->data_len == 0) {
-			TAILQ_REMOVE(&c->response_head, resp, entry);
-			free(resp);
-		}
-	}
-
-	if (TAILQ_EMPTY(&c->response_head)) {
-		if (c->gotweb_flags == GOT_DONE)
-			fcgi_cleanup_request(c);
-		else
-			event_del(&c->resp_ev);
-	}
-}
-
-void
 fcgi_timeout(int fd, short events, void *arg)
 {
 	fcgi_cleanup_request((struct request*) arg);
@@ -378,7 +338,6 @@ fcgi_add_response(struct request *c, struct fcgi_response *resp)
 	}
 
 	TAILQ_INSERT_TAIL(&c->response_head, resp, entry);
-	event_add(&c->resp_ev, NULL);
 }
 
 void
@@ -411,6 +370,7 @@ fcgi_create_end_record(struct request *c)
 	resp->data_len = sizeof(struct fcgi_end_request_body) +
 	    sizeof(struct fcgi_record_header);
 	fcgi_add_response(c, resp);
+	c->sock->request_loop = LOOP_FINISH;
 }
 
 void
@@ -421,8 +381,6 @@ fcgi_cleanup_request(struct request *c)
 	evtimer_del(&c->tmo);
 	if (event_initialized(&c->ev))
 		event_del(&c->ev);
-	if (event_initialized(&c->resp_ev))
-		event_del(&c->resp_ev);
 	close(c->fd);
 
 	while ((resp = TAILQ_FIRST(&c->response_head))) {
@@ -434,6 +392,7 @@ fcgi_cleanup_request(struct request *c)
 
 	if (! c->inflight_fds_accounted)
 		cgi_inflight--;
+
 	free(c);
 }
 

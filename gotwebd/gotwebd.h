@@ -87,8 +87,6 @@
 #define FD_RESERVE		 5
 #define FD_NEEDED		 6
 
-#define GOT_DONE		 1
-
 #define FCGI_BEGIN_REQUEST	 1
 #define FCGI_ABORT_REQUEST	 2
 #define FCGI_END_REQUEST	 3
@@ -151,7 +149,6 @@ struct request {
 	LIST_ENTRY(request)		 entry;
 	struct socket			*sock;
 	struct event			 ev;
-	struct event			 resp_ev;
 	struct event			 tmo;
 
 	uint16_t			 id;
@@ -170,7 +167,6 @@ struct request {
 	struct env_head			 env;
 	int				 env_count;
 
-	uint8_t				 gotweb_flags;
 	uint8_t				 request_started;
 	int				 inflight_fds_accounted;
 };
@@ -201,7 +197,6 @@ TAILQ_HEAD(addresslist, address);
 
 struct gw_trans {
 	/* TAILQ_HEAD(headers, gw_header)	 gw_headers; */
-	TAILQ_HEAD(dirs, gw_dir)	 gw_dirs;
 	struct got_repository	*repo;
 	unsigned int		 repos_total;
 };
@@ -239,6 +234,12 @@ struct server {
 	in_port_t	 fcgi_socket_port;
 };
 TAILQ_HEAD(serverlist, server);
+
+enum loop_type {
+	LOOP_END,
+	LOOP_START,
+	LOOP_FINISH,
+};
 
 enum sock_type {
 	UNIX,
@@ -281,6 +282,8 @@ struct socket {
 	struct event	 evt;
 	struct event	 ev;
 	struct event	 pause;
+
+	int		 request_loop;
 };
 TAILQ_HEAD(socketlist, socket);
 
@@ -394,10 +397,12 @@ int	 cmdline_symset(char *);
 
 /* fcgi.c */
 void	 fcgi_request(int, short, void *);
-void	 fcgi_response(int, short, void *);
 void	 fcgi_gen_response(struct request *, char *);
 void	 fcgi_add_response(struct request *, struct fcgi_response *);
 void	 fcgi_timeout(int, short, void *);
+void	 fcgi_cleanup_request(struct request *);
+void	 fcgi_create_end_record(struct request *);
+void	 dump_fcgi_record(const char *, struct fcgi_record_header *);
 
 /* got_operations.c */
 const struct got_error	*got_tests(struct querystring *);
