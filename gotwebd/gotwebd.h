@@ -74,6 +74,8 @@
 #define D_MAXSLCOMMDISP		 10
 #define D_MAXCOMMITDISP		 25
 
+#define BUF			 8192 
+
 #define TIMEOUT_DEFAULT		 120
 
 #define FCGI_CONTENT_SIZE	 65535
@@ -400,6 +402,9 @@ void sockets_socket_accept(int, short, void *);
 int sockets_privinit(struct gotwebd *, struct socket *);
 
 /* gotweb.c */
+const struct got_error *gotweb_render_content_type(struct request *, uint8_t *);
+const struct got_error
+    *gotweb_render_content_type_file(struct request *, uint8_t *, char *);
 const struct got_error *gotweb_get_time_str(char **, time_t, int);
 const struct got_error *gotweb_init_transport(struct transport **);
 const struct got_error *gotweb_escape_html(char **, const char *);
@@ -419,6 +424,7 @@ void fcgi_cleanup_request(struct request *);
 void fcgi_create_end_record(struct request *);
 void dump_fcgi_record(const char *, struct fcgi_record_header *);
 int fcgi_gen_response(struct request *, char *);
+int fcgi_gen_binary_response(struct request *, const uint8_t *, int);
 
 /* got_operations.c */
 const struct got_error *got_tests(struct querystring *);

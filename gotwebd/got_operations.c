@@ -552,7 +552,7 @@ got_get_repo_tags(struct request *c, int limit)
 		got_ref_close(ref);
 		if (error)
 			goto err;
-	} else if (qs-> commit == NULL && qs->action == TAG) {
+	} else if (qs->commit == NULL && qs->action == TAG) {
 		error = got_error_msg(GOT_ERR_EOF, "commit id missing");
 		goto err;
 	} else {
@@ -882,7 +882,7 @@ got_output_repo_tree(struct request *c)
 				goto done;
 			if (fcgi_gen_response(c, "&commit=") == -1)
 				goto done;
-			if (fcgi_gen_response(c, qs->commit) == -1)
+			if (fcgi_gen_response(c, rc->commit_id) == -1)
 				goto done;
 			if (fcgi_gen_response(c, "&folder=") == -1)
 				goto done;
@@ -946,7 +946,7 @@ got_output_repo_tree(struct request *c)
 
 			if (fcgi_gen_response(c, "&commit=") == -1)
 				goto done;
-			if (fcgi_gen_response(c, qs->commit) == -1)
+			if (fcgi_gen_response(c, rc->commit_id) == -1)
 				goto done;
 
 			if (fcgi_gen_response(c, "&folder=") == -1)
@@ -997,7 +997,7 @@ got_output_repo_tree(struct request *c)
 
 			if (fcgi_gen_response(c, "&commit=") == -1)
 				goto done;
-			if (fcgi_gen_response(c, qs->commit) == -1)
+			if (fcgi_gen_response(c, rc->commit_id) == -1)
 				goto done;
 
 			if (fcgi_gen_response(c, "&folder=") == -1)
@@ -1038,7 +1038,7 @@ got_output_repo_tree(struct request *c)
 
 			if (fcgi_gen_response(c, "&commit=") == -1)
 				goto done;
-			if (fcgi_gen_response(c, qs->commit) == -1)
+			if (fcgi_gen_response(c, rc->commit_id) == -1)
 				goto done;
 
 			if (fcgi_gen_response(c, "&folder=") == -1)
@@ -1084,6 +1084,116 @@ const struct got_error *
 got_output_repo_blob(struct request *c)
 {
 	const struct got_error *error = NULL;
+	struct transport *t = c->t;
+	struct got_repository *repo = t->repo;
+	struct querystring *qs = c->t->qs;
+	struct got_object_id *obj_id = NULL;
+	struct got_object_id *commit_id = NULL;
+	struct got_reflist_head refs;
+	struct got_blob_object *blob = NULL;
+	char *path = NULL, *in_repo_path = NULL;
+	int obj_type, set_mime = 0, type = 0;
+	char *buf_output = NULL;
+	size_t len, hdrlen;
+	const uint8_t *buf;
+
+	TAILQ_INIT(&refs);
+
+	if (asprintf(&path, "%s%s%s", qs->folder ? qs->folder : "",
+	    qs->folder ? "/" : "", qs->file) == -1) {
+		error = got_error_from_errno("asprintf");
+		goto done;
+	}
+
+	error = got_repo_map_path(&in_repo_path, repo, path);
+	if (error)
+		goto done;
+
+	error = got_repo_match_object_id(&commit_id, NULL, qs->commit,
+	    GOT_OBJ_TYPE_COMMIT, &refs, repo);
+	if (error)
+		goto done;
+
+	error = got_object_id_by_path(&obj_id, repo, commit_id, in_repo_path);
+	if (error)
+		goto done;
+
+	if (obj_id == NULL) {
+		error = got_error(GOT_ERR_NO_OBJ);
+		goto done;
+	}
+
+	error = got_object_get_type(&obj_type, repo, obj_id);
+	if (error)
+		goto done;
+
+	if (obj_type != GOT_OBJ_TYPE_BLOB) {
+		error = got_error(GOT_ERR_OBJ_TYPE);
+		goto done;
+	}
+
+	error = got_object_open_as_blob(&blob, repo, obj_id, BUF);
+	if (error)
+		goto done;
+	hdrlen = got_object_blob_get_hdrlen(blob);
+	do {
+		error = got_object_blob_read_block(&len, blob);
+		if (error)
+			goto done;
+		buf = got_object_blob_get_read_buf(blob);
+
+		/*
+		 * Skip blob object header first time around,
+		 * which also contains a zero byte.
+		 */
+		buf += hdrlen;
+		if (set_mime == 0) {
+			if (isbinary(buf, len - hdrlen)) {
+				error = gotweb_render_content_type_file(c,
+				    "application/octet-stream",
+				    qs->file);
+				if (error) {
+					log_warnx("%s: %s", __func__,
+					    error->msg);
+					goto done;
+				}
+				type = 0;
+			} else {
+				error = gotweb_render_content_type(c,
+				  "text/text");
+				if (error) {
+					log_warnx("%s: %s", __func__,
+					    error->msg);
+					goto done;
+				}
+				type = 1;
+			}
+		}
+		set_mime = 1;
+		if (type) {
+			buf_output = calloc(len - hdrlen + 1,
+			    sizeof(*buf_output));
+			if (buf_output == NULL) {
+				error = got_error_from_errno("calloc");
+				goto done;
+			}
+			memcpy(buf_output, buf, len - hdrlen);
+			fcgi_gen_response(c, buf_output);
+			free(buf_output);
+			buf_output = NULL;
+		} else
+			fcgi_gen_binary_response(c, buf, len - hdrlen);
+
+		hdrlen = 0;
+	} while (len != 0);
+done:
+	free(buf_output);
+	free(in_repo_path);
+	free(commit_id);
+	free(obj_id);
+	free(path);
+	if (blob)
+		got_object_blob_close(blob);
 	return error;
 }
 

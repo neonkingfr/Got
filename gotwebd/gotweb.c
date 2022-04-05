@@ -80,8 +80,6 @@ static const struct got_error *gotweb_parse_querystring(struct querystring **,
     char *);
 static const struct got_error *gotweb_assign_querystring(struct querystring **,
     char *, char *);
-static const struct got_error *gotweb_render_content_type(struct request *,
-    uint8_t *);
 static const struct got_error *gotweb_render_header(struct request *);
 static const struct got_error *gotweb_render_footer(struct request *);
 static const struct got_error *gotweb_render_index(struct request *);
@@ -161,11 +159,9 @@ gotweb_process_request(struct request *c)
 
 	/* render top of page */
 	if (qs != NULL && qs->action == BLOB) {
-		error = gotweb_render_content_type(c, "text/text");
-		if (error) {
-			log_warnx("%s: %s", __func__, error->msg);
-			goto err;
-		}
+		error = got_get_repo_commits(c, 1);
+		if (error)
+			goto done;
 		error = got_output_repo_blob(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
@@ -264,7 +260,7 @@ gotweb_process_request(struct request *c)
 
 	goto done;
 err:
-	if (html == 0) {
+	if (html == 0 && qs->action == BLOB) {
 		error2 = gotweb_render_content_type(c, "text/text");
 		if (error2)
 			return;
@@ -585,13 +581,33 @@ gotweb_free_transport(struct transport *t)
 	free(t);
 }
 
-static const struct got_error *
+const struct got_error *
 gotweb_render_content_type(struct request *c, uint8_t *type)
 {
 	const struct got_error *error = NULL;
 	char *h = NULL;
 
 	if (asprintf(&h, "Content-type: %s\r\n\r\n", type) == -1) {
+		error = got_error_from_errno2("%s: asprintf", __func__);
+		goto done;
+	}
+
+	fcgi_gen_response(c, h);
+done:
+	free(h);
+
+	return error;
+}
+
+const struct got_error *
+gotweb_render_content_type_file(struct request *c, uint8_t *type, char *file)
+{
+	const struct got_error *error = NULL;
+	char *h = NULL;
+
+	if (asprintf(&h, "Content-type: %s\r\n"
+	    "Content-disposition: attachment; filename=%s\r\n\r\n",
+	    type, file) == -1) {
 		error = got_error_from_errno2("%s: asprintf", __func__);
 		goto done;
 	}
