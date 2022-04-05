@@ -122,7 +122,7 @@ gotweb_process_request(struct request *c)
 	struct querystring *qs = NULL;
 	struct repo_dir *repo_dir = NULL;
 	uint8_t err[] = "gotwebd experienced an error: ";
-	int erre = 0, h_s = 0;
+	int h_s = 0;
 
 	/* init the transport */
 	error = gotweb_init_transport(&c->t);

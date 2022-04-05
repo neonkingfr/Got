@@ -367,7 +367,6 @@ sockets_dispatch_gotwebd(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
 	struct privsep *ps = p->p_ps;
 	int res = 0, cmd = 0, verbose;
-	unsigned int mode;
 
 	switch (imsg->hdr.type) {
 	case IMSG_CFG_SRV:

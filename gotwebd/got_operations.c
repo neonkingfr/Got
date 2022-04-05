@@ -545,7 +545,7 @@ got_output_diff(struct request *c)
 	int obj_type, fd;
 	size_t linesize = 0;
 	ssize_t linelen;
-	int wrlen = 0, wi;
+	int wrlen = 0;
 
 	TAILQ_INIT(&refs);
 
