@@ -147,6 +147,18 @@ gotweb_process_request(struct request *c)
 		goto err;
 	}
 
+	/*
+	 * certain actions require a commit id in the querystring. this stops
+	 * bad actors from exploiting this by manually manipulating the
+	 * querystring.
+	 */
+
+	if (qs->commit == NULL && (qs->action == BLAME || qs->action == BLOB ||
+	    qs->action == DIFF)) {
+		error2 = got_error(GOT_ERR_QUERYSTRING);
+		goto render;
+	}
+
 	if (qs->action != INDEX) {
 		error = gotweb_init_repo_dir(&repo_dir, qs->path);
 		if (error)
@@ -169,6 +181,7 @@ gotweb_process_request(struct request *c)
 		}
 		goto done;
 	} else {
+render:
 		error = gotweb_render_content_type(c, "text/html");
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
@@ -180,6 +193,11 @@ gotweb_process_request(struct request *c)
 	error = gotweb_render_header(c);
 	if (error) {
 		log_warnx("%s: %s", __func__, error->msg);
+		goto err;
+	}
+
+	if (error2) {
+		error = error2;
 		goto err;
 	}
 
@@ -260,11 +278,6 @@ gotweb_process_request(struct request *c)
 
 	goto done;
 err:
-	if (html == 0 && qs->action == BLOB) {
-		error2 = gotweb_render_content_type(c, "text/text");
-		if (error2)
-			return;
-	}
 	if (html && fcgi_gen_response(c, "<div id='err_content'>") == -1)
 		return;
 	if (fcgi_gen_response(c, err) == -1)

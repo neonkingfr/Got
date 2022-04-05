@@ -416,8 +416,10 @@ fcgi_send_response(struct request *c, struct fcgi_response *resp)
 	    resp->data_len)) == -1) {
 		nanosleep(&ts, NULL);
 		err++;
-		if (err == th)
+		if (err == th) {
 			c->sock->client_status = CLIENT_DISCONNECT;
+			break;
+		}
 	}
 
 	free(resp);
