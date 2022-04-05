@@ -401,11 +401,6 @@ body {
 	float: left;
 	width: 100%;
 }
-#briefs_wrapper {
-	clear: left;
-	float: left;
-	width: 100%;
-}
 #briefs_age {
 	padding-left: 10px;
 	padding-top: 5px;
@@ -430,6 +425,7 @@ body {
 	padding-bottom: 5px;
 	width: 65%;
 }
+
 /* index.tmpl */
 
 #index_header {
@@ -540,21 +536,28 @@ body {
 	float: left;
 	width: 100%;
 }
-#commits_line_wrapper {
-	clear: left;
+#commits_header_wrapper {
 	float: left;
 	background-color: #f5fcfb;
-	padding-top: 3px;
-	padding-bottom: 3px;
 	width: 100%;
+}
+#commits_header {
+	float: left;
+	padding-left: 10px;
+	padding-top: 5px;
+	padding-bottom: 2px;
+	width: 80%;
 }
 #commit {
 	clear: left;
 	float: left;
 	padding-left: 20px;
-	padding-top: 20px;
 	padding-bottom: 20px;
 	white-space: pre-wrap;
+}
+#commits_line {
+	clear: left;
+	float: left;
 }
 
 /* blame.tmpl */
@@ -819,7 +822,6 @@ body {
 	clear: left;
 	float: left;
 	margin-left: 20px;
-	margin-top: 20px;
 	margin-bottom: 20px;
 	font-family: monospace;
 	white-space: pre;
