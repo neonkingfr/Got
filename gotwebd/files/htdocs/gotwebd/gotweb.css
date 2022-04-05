@@ -371,20 +371,8 @@ body {
 	padding-bottom: 5px;
 }
 
-/* err.tmpl */
+/* err action */
 
-#err_title_wrapper {
-	clear: left;
-	float: left;
-	width: 100%;
-	background-color: LightSlateGray;
-	color: #ffffff;
-}
-#err_title {
-	padding-left: 10px;
-	padding-top: 5px;
-	padding-bottom: 5px;
-}
 #err_content {
 	clear: left;
 	float: left;

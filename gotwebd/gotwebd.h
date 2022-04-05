@@ -349,13 +349,13 @@ enum querystring_elements {
 };
 
 enum query_actions {
-	INDEX,
 	BLAME,
 	BLOB,
 	BRIEFS,
 	COMMITS,
 	DIFF,
 	ERR,
+	INDEX,
 	SUMMARY,
 	TAG,
 	TAGS,

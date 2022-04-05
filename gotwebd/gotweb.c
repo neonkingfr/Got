@@ -87,8 +87,26 @@ static const struct got_error *gotweb_get_clone_url(char **, struct server *,
     char *);
 static const struct got_error *gotweb_render_navs(struct request *,
     struct server *);
+static const struct got_error *gotweb_render_blame(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_blob(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_briefs(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_commits(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_diff(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_summary(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_tag(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_tags(struct request *,
+    struct server *);
+static const struct got_error *gotweb_render_tree(struct request *,
+    struct server *);
 
-static void	 gotweb_free_querystring(struct querystring *);
+static void gotweb_free_querystring(struct querystring *);
 
 struct server *gotweb_get_server(uint8_t *, uint8_t *);
 
@@ -176,23 +194,92 @@ gotweb_process_request(struct request *c)
 		goto err;
 	}
 
-	if (c->t->qs->action != INDEX) {
-		switch(c->t->qs->action) {
-		default:
-			break;
+	switch(c->t->qs->action) {
+	case BLAME:
+		error = gotweb_render_blame(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
 		}
-	} else {
+		break;
+	case BLOB:
+		error = gotweb_render_blob(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case BRIEFS:
+		error = gotweb_render_briefs(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case COMMITS:
+		error = gotweb_render_commits(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case DIFF:
+		error = gotweb_render_diff(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case INDEX:
 		error = gotweb_render_index(c, srv);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
+		break;
+	case SUMMARY:
+		error = gotweb_render_summary(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case TAG:
+		error = gotweb_render_tag(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case TAGS:
+		error = gotweb_render_tags(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case TREE:
+		error = gotweb_render_tree(c, srv);
+		if (error) {
+			log_warnx("%s: %s", __func__, error->msg);
+			goto err;
+		}
+		break;
+	case ERR:
+	default:
+		if (fcgi_gen_response(c, "<div id='err_content'>\n") == -1)
+			goto err;
+		if (fcgi_gen_response(c, "Error: Bad Querystring\n") == -1)
+			goto err;
+		if (fcgi_gen_response(c, "</div>\n") == -1)
+			goto err;
+		break;
 	}
 
 	goto done;
 err:
 	/*
-	 * we don't care if errors are pretty
+	 * we don't care if errors are pretty at this point
 	 * for example, if srv == NULL, how can we render anything other
 	 * than the text error?
 	 */
@@ -349,9 +436,15 @@ gotweb_assign_querystring(struct querystring **qs, char *key, char *value)
 			for (a_cnt = 0; a_cnt < ACTIONS__MAX; a_cnt++) {
 				if (strcmp(value, action_keys[a_cnt].name) != 0)
 					continue;
-				(*qs)->action = action_keys[a_cnt].action;
-				break;
+				else if (strcmp(value,
+				    action_keys[a_cnt].name) == 0){
+					(*qs)->action =
+					    action_keys[a_cnt].action;
+					goto qa_found;
+				}
 			}
+			(*qs)->action = ERR;
+qa_found:
 			break;
 		case COMMIT:
 			(*qs)->commit = strdup(value);
@@ -961,6 +1054,69 @@ div:
 done:
 	if (d != NULL && closedir(d) == EOF && error == NULL)
 		error = got_error_from_errno("closedir");
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_blame(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_blob(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_briefs(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_commits(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_diff(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_summary(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_tag(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_tags(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
+	return error;
+}
+
+static const struct got_error *
+gotweb_render_tree(struct request *c, struct server *srv)
+{
+	const struct got_error *error = NULL;
 	return error;
 }
 
