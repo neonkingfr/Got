@@ -1455,6 +1455,10 @@ gotweb_render_briefs(struct request *c)
 			goto done;
 		if (fcgi_gen_response(c, rc->commit_id) == -1)
 			goto done;
+		if (fcgi_gen_response(c, "&headref=") == -1)
+			goto done;
+		if (fcgi_gen_response(c, qs->headref) == -1)
+			goto done;
 		if (fcgi_gen_response(c, "'>") == -1)
 			goto done;
 		if (fcgi_gen_response(c, "tree") == -1)
