@@ -416,12 +416,6 @@ got_get_repo_commits(struct request *c, int limit)
 		goto err;
 
 	for (;;) {
-		/*
-		 * XXX: leak starts here
-		 * There is a leak somewhere in the graph code
-		 * comment out lines 435-454, 459-471, 478-490 to test,
-		 * unless i'm missing something here
-		 */
 		error = got_commit_graph_iter_next(&id, graph, repo, NULL,
 		    NULL);
 		if (error) {

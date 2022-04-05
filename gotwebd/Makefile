@@ -24,6 +24,7 @@ CPPFLAGS +=	-I${.CURDIR}/../include -I${.CURDIR}/../lib -I${.CURDIR}
 LDADD +=	-lz -levent -lutil
 YFLAGS =
 DPADD =		${LIBEVENT} ${LIBUTIL}
+CFLAGS += -DGOT_NO_OBJ_CACHE
 
 .if ${GOT_RELEASE} != "Yes"
 NOMAN = Yes
