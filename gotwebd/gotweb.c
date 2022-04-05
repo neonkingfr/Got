@@ -157,7 +157,6 @@ gotweb_process_request(struct request *c)
 			log_warnx("%s: %s", __func__, error->msg);
 			goto err;
 		}
-		/* got_render_blob; */
 		error = gotweb_render_blob(c);
 		if (error) {
 			log_warnx("%s: %s", __func__, error->msg);
@@ -1254,6 +1253,17 @@ static const struct got_error *
 gotweb_render_blob(struct request *c)
 {
 	const struct got_error *error = NULL;
+
+
+
+
+
+
+
+
+
+
+
 	return error;
 }
 
@@ -2183,6 +2193,9 @@ gotweb_render_tags(struct request *c)
 	} else
 		error = got_get_repo_tags(c, srv->max_commits_display);
 	if (error)
+		goto done;
+
+	if (t->tag_count == 0)
 		goto done;
 
 	if (fcgi_gen_response(c, "<div id='tags_title_wrapper'>\n") == -1)
