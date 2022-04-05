@@ -616,7 +616,7 @@ got_get_repo_tags(struct request *c, int limit)
 			goto err;
 	}
 
-	if (limit == 1) {
+	if (qs->action != SUMMARY && qs->action != TAGS) {
 		error = got_object_open_as_commit(&commit, repo, id);
 		if (error)
 			goto err;
@@ -758,7 +758,7 @@ got_get_repo_tags(struct request *c, int limit)
 		while (*new_repo_tag->tag_commit == '\n')
 			new_repo_tag->tag_commit++;
 
-		if (limit == 1) {
+		if (qs->action != SUMMARY && qs->action != TAGS) {
 			commit_msg = commit_msg0;
 			while (*commit_msg == '\n')
 				commit_msg++;
